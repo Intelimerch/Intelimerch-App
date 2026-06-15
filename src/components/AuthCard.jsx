@@ -15,10 +15,12 @@ export default function AuthCard({ children }) {
 
 export function LogoMark() {
   return (
-    <div className="text-center mb-6">
-      <div className="inline-block font-black text-2xl leading-tight tracking-tight">
-        <div>INTELI<span className="text-primary">MERCH</span></div>
-      </div>
+    <div className="flex justify-center mb-6">
+      <img 
+        src="/logo.png" 
+        alt="Intelimerch" 
+        className="h-12 w-auto object-contain"
+      />
     </div>
   )
 }
