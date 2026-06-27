@@ -1,0 +1,5 @@
+[33m8441b07[m[33m ([m[1;36mHEAD -> [m[1;32mfeature/campaign-modal-and-auth-logo[m[33m, [m[1;31morigin/feature/update-logo[m[33m, [m[1;31morigin/feature/campaign-modal-and-auth-logo[m[33m, [m[1;32mfeature/update-logo[m[33m)[m Merge branch 'main' into feature/update-logo
+[33m276ae6b[m feat: add campaign publish success modal and update logos across auth pages - Replace text logo with brand logo in Sign In/Sign Up pages - Update AuthCard LogoMark component to use image logo - Add campaign publish success modal matching Figma design - Add copy link functionality to modal
+[33m18c864f[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m Merge pull request #1 from intelimerch-eng/feature/update-logo
+[33m40ef596[m feat: replace text logo with brand logo in dashboard sidebar
+[33m9730b85[m removed tag group from dashboard sidebar
