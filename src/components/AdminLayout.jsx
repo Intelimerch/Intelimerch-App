@@ -30,7 +30,13 @@ export default function AdminLayout() {
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}>
           <div className="p-4 flex items-center justify-between border-b border-gray-50 min-h-[64px]">
-            {!collapsed && <span className="font-black text-lg tracking-tight">INTELI<span className="text-primary">MERCH</span></span>}
+            {!collapsed && (
+              <img 
+                src="/logo.png" 
+                alt="Intelimerch" 
+                className="h-12 w-auto object-contain"
+              />
+            )}
             <button onClick={() => setCollapsed(c => !c)} className="p-1.5 hover:bg-gray-100 rounded-lg hidden lg:flex items-center justify-center ml-auto">
               <ChevronLeft size={16} className={`text-gray-400 transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`} />
             </button>
@@ -70,7 +76,11 @@ export default function AdminLayout() {
             <button onClick={() => setMobileOpen(true)} className="p-2 hover:bg-gray-100 rounded-xl">
               <Menu size={20} className="text-gray-600" />
             </button>
-            <span className="font-black text-lg tracking-tight">INTELI<span className="text-primary">MERCH</span></span>
+            <img 
+              src="/logo.png" 
+              alt="Intelimerch" 
+              className="h-10 w-auto object-contain"
+            />
           </div>
           <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8"><Outlet /></main>
         </div>
