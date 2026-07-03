@@ -5,8 +5,12 @@ export default function ActivateMerch() {
   const navigate = useNavigate()
   return (
     <MobileShell>
-      <div className="mb-8 pt-4">
-        <span className="font-black text-xl">INTELI<span className="text-primary">MERCH</span></span>
+      <div className="mb-8 pt-4 flex justify-center">
+        <img 
+          src="/logo.png" 
+          alt="Intelimerch" 
+          className="h-12 w-auto object-contain"
+        />
       </div>
 
       <p className="text-xs font-bold text-primary tracking-widest mb-2">FIRST TAP DETECTED</p>
