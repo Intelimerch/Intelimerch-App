@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './context/AuthContext'
+import { useAuth } from './context/AuthContext'
 
 // Auth Pages
 import SignUp from './pages/auth/SignUp'
@@ -10,15 +12,17 @@ import VerifyAccount from './pages/auth/VerifyAccount'
 import DashboardLayout from './components/DashboardLayout'
 import Overview from './pages/dashboard/Overview'
 import Campaigns from './pages/dashboard/Campaigns'
+import CreateCampaign from './pages/dashboard/CreateCampaign'  // ← NEW
 import NewCampaign from './pages/dashboard/NewCampaign'
 import Products from './pages/dashboard/Products'
 import AddProduct from './pages/dashboard/AddProduct'
 import PerksLibrary from './pages/dashboard/PerksLibrary'
 import UploadPerk from './pages/dashboard/UploadPerk'
 import TagGroups from './pages/dashboard/TagGroups'
-import Analytics from './pages/dashboard/Analytics'
+import Fans from './pages/dashboard/Fans'
 import Profile from './pages/dashboard/Profile'
 import Notifications from './pages/dashboard/Notifications'
+import EditProduct from './pages/dashboard/EditProduct'
 
 // Fan Pages (Mobile)
 import ActivateMerch from './pages/fan/ActivateMerch'
@@ -43,55 +47,97 @@ import AdminCampaigns from './pages/admin/AdminCampaigns'
 import AdminAnalytics from './pages/admin/AdminAnalytics'
 import AdminTags from './pages/admin/AdminTags'
 
+// ─── Protected Route Component ───
+function ProtectedRoute({ children }) {
+  const { user, isLoading } = useAuth()
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>
+  }
+
+  if (!user) {
+    return <Navigate to="/signin" replace />
+  }
+
+  return children
+}
+
+// ─── Admin Route Component ───
+function AdminRoute({ children }) {
+  const { user, isLoading } = useAuth()
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>
+  }
+
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  return children
+}
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/signin" replace />} />
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Navigate to="/signin" replace />} />
 
-        {/* Auth */}
-        <Route path="/signup" element={<SignUp />} />
-        <Route path="/signin" element={<SignIn />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/verify" element={<VerifyAccount />} />
+          {/* Auth */}
+          <Route path="/signup" element={<SignUp />} />
+          <Route path="/signin" element={<SignIn />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/verify" element={<VerifyAccount />} />
 
-        {/* Creator Dashboard */}
-        <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route index element={<Overview />} />
-          <Route path="campaigns" element={<Campaigns />} />
-          <Route path="campaigns/new" element={<NewCampaign />} />
-          <Route path="campaigns/:campaignId/analytics" element={<CampaignAnalytics />} />
-          <Route path="products" element={<Products />} />
-          <Route path="products/add" element={<AddProduct />} />
-          <Route path="perks" element={<PerksLibrary />} />
-          <Route path="perks/upload" element={<UploadPerk />} />
-          <Route path="tag-groups" element={<TagGroups />} />
-          <Route path="analytics" element={<Analytics />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="notifications" element={<Notifications />} />
-        </Route>
+          {/* Creator Dashboard - Protected */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }>
+            <Route index element={<Overview />} />
+            <Route path="campaigns" element={<Campaigns />} />
+            <Route path="campaigns/create" element={<CreateCampaign />} /> 
+            <Route path="campaigns/new" element={<NewCampaign />} />
+            <Route path="campaigns/:campaignId/analytics" element={<CampaignAnalytics />} />
+            <Route path="products" element={<Products />} />
+            <Route path="products/add" element={<AddProduct />} />
+            <Route path="products/edit/:productId" element={<EditProduct />} />
+            <Route path="fans" element={<Fans />} />
+            <Route path="perks" element={<PerksLibrary />} />
+            <Route path="perks/upload" element={<UploadPerk />} />
+            <Route path="tag-groups" element={<TagGroups />} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="notifications" element={<Notifications />} />
+          </Route>
 
-        {/* Fan (mobile) */}
-        <Route path="/fan/activate" element={<ActivateMerch />} />
-        <Route path="/fan/activated" element={<Activated />} />
-        <Route path="/fan/claimed" element={<AlreadyClaimed />} />
-        <Route path="/fan/perks" element={<PerksLanding />} />
-        <Route path="/fan/perks/video" element={<VideoPerk />} />
-        <Route path="/fan/perks/discount" element={<DiscountPerk />} />
-        <Route path="/fan/perks/audio" element={<AudioPerk />} />
-        <Route path="/fan/perks/image" element={<ImagePerk />} />
-        <Route path="/fan/perks/document" element={<DocumentPerk />} />
-        <Route path="/fan/perks/link" element={<LinkPerk />} />
+          {/* Fan (mobile) */}
+          <Route path="/fan/activate" element={<ActivateMerch />} />
+          <Route path="/fan/activated" element={<Activated />} />
+          <Route path="/fan/claimed" element={<AlreadyClaimed />} />
+          <Route path="/fan/perks" element={<PerksLanding />} />
+          <Route path="/fan/perks/video" element={<VideoPerk />} />
+          <Route path="/fan/perks/discount" element={<DiscountPerk />} />
+          <Route path="/fan/perks/audio" element={<AudioPerk />} />
+          <Route path="/fan/perks/image" element={<ImagePerk />} />
+          <Route path="/fan/perks/document" element={<DocumentPerk />} />
+          <Route path="/fan/perks/link" element={<LinkPerk />} />
 
-        {/* Admin */}
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminOverview />} />
-          <Route path="creators" element={<CreatorsManagement />} />
-          <Route path="campaigns" element={<AdminCampaigns />} />
-          <Route path="analytics" element={<AdminAnalytics />} />
-          <Route path="tags" element={<AdminTags />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+          {/* Admin - Protected */}
+          <Route path="/admin" element={
+            <AdminRoute>
+              <AdminLayout />
+            </AdminRoute>
+          }>
+            <Route index element={<AdminOverview />} />
+            <Route path="creators" element={<CreatorsManagement />} />
+            <Route path="campaigns" element={<AdminCampaigns />} />
+            <Route path="analytics" element={<AdminAnalytics />} />
+            <Route path="tags" element={<AdminTags />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
