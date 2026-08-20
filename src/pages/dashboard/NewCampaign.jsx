@@ -134,8 +134,21 @@ export default function NewCampaign() {
     setDragOverId(null);
   };
 
-  const buildDummyUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || "file")}`;
+  const handleBlockFile = async (blockId, field, file) => {
+    if (!file) return;
+    if (!campaignId) {
+      setError("Select a campaign first (see 'Assign Campaign' in the sidebar) to upload media.");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await campaignAPI.uploadPageMedia(campaignId, fd);
+      updateBlock(blockId, field, res?.data?.url);
+    } catch (err) {
+      setError(err.message || "Media upload failed. Please try again.");
+    }
+  };
 
   const handlePublish = async () => {
     setError("");
@@ -151,7 +164,6 @@ export default function NewCampaign() {
       const pageStructure = { blocks };
 
       const response = await campaignAPI.createPage(campaignId, { pageStructure });
-      console.log("✅ Campaign page created:", response);
       setShowSuccessModal(true);
     } catch (err) {
       console.error("❌ Error publishing campaign page:", err);
@@ -163,7 +175,6 @@ export default function NewCampaign() {
 
   const handleSaveDraft = () => {
     // No draft-save endpoint exists yet — this is local only for now.
-    console.log("Draft (local only):", { campaignId, blocks });
     alert("Draft saved locally — there's no backend draft endpoint yet, so this isn't persisted remotely.");
   };
 
@@ -310,7 +321,7 @@ export default function NewCampaign() {
                     </div>
                     <div className="p-4">
                       {editingId === block.id
-                        ? <BlockEditor block={block} onChange={updateBlock} onFile={(field, file) => updateBlock(block.id, field, buildDummyUrl(file?.name))} />
+                        ? <BlockEditor block={block} onChange={updateBlock} onFile={(field, file) => handleBlockFile(block.id, field, file)} />
                         : <BlockPreview block={block} onClick={() => setEditingId(block.id)} />}
                     </div>
                   </div>
@@ -391,7 +402,7 @@ function BlockEditor({ block, onChange, onFile }) {
             <input type="file" className="hidden" onChange={e => onFile("url", e.target.files?.[0])} />
             <span className="text-sm text-gray-500">{block.meta?.url ? "File selected ✓" : `Tap to upload ${block.type.toLowerCase()}`}</span>
           </label>
-          <p className="text-xs text-gray-400">No upload endpoint yet — sends a placeholder URL for testing.</p>
+          <p className="text-xs text-gray-400">Media is uploaded and served by the platform.</p>
           {block.type === "Audio" && (
             <input value={block.content || ""} onChange={e => onChange(block.id, "content", e.target.value)} className="input-field" placeholder="Track title..." />
           )}

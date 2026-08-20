@@ -1,15 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, Users, ShoppingBag, Package, Repeat, MoreHorizontal, ChevronDown, Download, Calendar } from 'lucide-react'
-
-// Mock data for fans
-const mockFans = [
-  { id: 1, name: 'James Joshua', email: 'jamesjosh@gmail.com', category: 'Hoodie & Cap', items: 4, status: 'Active', purchaseDate: '07/16/2026' },
-  { id: 2, name: 'Adeniyi Fola', email: 'adiefola@gmail.com', category: 'T-shirt', items: 2, status: 'Active', purchaseDate: '07/14/2026' },
-  { id: 3, name: 'Peter Silas', email: 'petesilas@gmail.com', category: 'Tote bag & Hoodie', items: 6, status: 'Active', purchaseDate: '07/12/2026' },
-  { id: 4, name: 'John Drury', email: 'johndrury@gmail.com', category: 'Cap', items: 2, status: 'Active', purchaseDate: '07/10/2026' },
-  { id: 5, name: 'Anthony Paul', email: 'ppaul@gmail.com', category: 'Hoodie', items: 3, status: 'Active', purchaseDate: '07/08/2026' },
-  { id: 6, name: 'Cole James', email: 'jamescole@gmail.com', category: 'T-shirt & Hoodie', items: 5, status: 'Active', purchaseDate: '07/06/2026' },
-]
+import { fanAPI } from '../../services/apiClient'
 
 // Filter options for dropdowns
 const merchTypes = ['Merch Type', 'Hoodie', 'T-shirt', 'Cap', 'Tote bag', 'Hoodie & Cap']
@@ -127,6 +118,9 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
 
 // ─── Main Component ──────────────────────────────────────────
 export default function Fans() {
+  const [fans, setFans] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedMerchType, setSelectedMerchType] = useState('All')
   const [selectedCampaign, setSelectedCampaign] = useState('All')
@@ -136,22 +130,54 @@ export default function Fans() {
   const [dropdownOpen, setDropdownOpen] = useState(null)
   const itemsPerPage = 6
 
-  const campaigns = ['Campaign', 'Summer Drop', 'VIP Member', 'Behind the Scenes']
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    fanAPI.getFans()
+      .then((res) => {
+        if (active) setFans(res?.data || [])
+      })
+      .catch(() => {
+        if (active) setError('Could not load fans. Please try again.')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [])
 
-  const filteredFans = mockFans.filter(fan => {
+  const campaigns = ['Campaign', ...new Set(fans.map(f => f.campaign).filter(Boolean))]
+
+  const filteredFans = fans.filter(fan => {
     const matchesSearch = fan.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           fan.email.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesMerch = selectedMerchType === 'All' || fan.category.includes(selectedMerchType)
-    return matchesSearch && matchesMerch
+    const matchesCampaign = selectedCampaign === 'All' || fan.campaign === selectedCampaign
+    return matchesSearch && matchesMerch && matchesCampaign
   })
 
-  const totalPages = Math.ceil(filteredFans.length / itemsPerPage)
+  const totalPages = Math.max(1, Math.ceil(filteredFans.length / itemsPerPage))
   const startIndex = (currentPage - 1) * itemsPerPage
   const currentFans = filteredFans.slice(startIndex, startIndex + itemsPerPage)
 
+  useEffect(() => { setCurrentPage(1) }, [searchTerm, selectedMerchType, selectedCampaign])
+
   const handleExport = () => {
-    console.log('Exporting fans data...')
+    const header = ['Name', 'Email', 'Category of Merch', 'Number of Items', 'Status', 'Campaign']
+    const rows = filteredFans.map(f => [f.name, f.email, f.category, f.items, f.status, f.campaign])
+    const csv = [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'fans.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
+
+  const totalItems = fans.reduce((sum, f) => sum + (f.items || 0), 0)
+  const uniqueProducts = new Set(fans.map(f => f.category).filter(c => c && c !== '—')).size
+  const repeatBuyers = fans.filter(f => f.items > 1).length
 
   return (
     <div>
@@ -172,8 +198,8 @@ export default function Fans() {
               <Users size={18} className="text-violet-500" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">4,826</p>
-          <p className="text-xs font-medium text-green-600">↑ 16% vs last month</p>
+          <p className="text-2xl font-bold text-gray-900">{fans.length.toLocaleString()}</p>
+          <p className="text-xs font-medium text-green-600">{fans.length ? 'Live fan count' : 'No fans yet'}</p>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-100 p-4">
@@ -183,8 +209,8 @@ export default function Fans() {
               <ShoppingBag size={18} className="text-teal-500" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">12,457</p>
-          <p className="text-xs font-medium text-green-600">↑ 12% vs last month</p>
+          <p className="text-2xl font-bold text-gray-900">{totalItems.toLocaleString()}</p>
+          <p className="text-xs font-medium text-green-600">Tagged items activated</p>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-100 p-4">
@@ -194,8 +220,8 @@ export default function Fans() {
               <Package size={18} className="text-orange-400" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">40</p>
-          <p className="text-xs font-medium text-green-600">↑ 8% vs last month</p>
+          <p className="text-2xl font-bold text-gray-900">{uniqueProducts}</p>
+          <p className="text-xs font-medium text-green-600">Across your campaigns</p>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-100 p-4">
@@ -205,8 +231,8 @@ export default function Fans() {
               <Repeat size={18} className="text-blue-400" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">1,243</p>
-          <p className="text-xs font-medium text-blue-600">70% of total fans</p>
+          <p className="text-2xl font-bold text-gray-900">{repeatBuyers}</p>
+          <p className="text-xs font-medium text-blue-600">{fans.length ? `${Math.round((repeatBuyers / fans.length) * 100)}% of total fans` : 'No fans yet'}</p>
         </div>
       </div>
 
@@ -299,7 +325,24 @@ export default function Fans() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {currentFans.map((fan) => (
+              {loading && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-500">Loading fans...</td>
+                </tr>
+              )}
+              {!loading && error && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-red-500">{error}</td>
+                </tr>
+              )}
+              {!loading && !error && currentFans.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-500">
+                    No fans found{fans.length ? ' matching your filters' : ' yet. Fans appear here once they activate your merch.'}
+                  </td>
+                </tr>
+              )}
+              {!loading && !error && currentFans.map((fan) => (
                 <tr key={fan.id} className="hover:bg-gray-50/50 transition-colors group">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{fan.name}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{fan.email}</td>
@@ -323,13 +366,13 @@ export default function Fans() {
                     {/* Dropdown Menu */}
                     {dropdownOpen === fan.id && (
                       <div className="absolute right-4 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                        <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
+                        <button onClick={() => setDropdownOpen(null)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
                           View Details
                         </button>
-                        <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
+                        <button onClick={() => setDropdownOpen(null)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
                           Send Message
                         </button>
-                        <button className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-all">
+                        <button onClick={() => setDropdownOpen(null)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-all">
                           Remove Fan
                         </button>
                       </div>
@@ -344,7 +387,7 @@ export default function Fans() {
         {/* ─── Pagination ────────────────────────────────── */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
           <p className="text-sm text-gray-500">
-            Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
+            Showing <span className="font-medium">{filteredFans.length ? startIndex + 1 : 0}</span> to{' '}
             <span className="font-medium">{Math.min(startIndex + itemsPerPage, filteredFans.length)}</span> of{' '}
             <span className="font-medium">{filteredFans.length}</span> fans
           </p>

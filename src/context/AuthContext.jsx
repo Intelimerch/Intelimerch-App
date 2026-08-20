@@ -1,6 +1,6 @@
 // src/context/AuthContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authAPI, setToken, clearToken } from '../services/apiClient';
+import { authAPI, setToken, setRefreshToken, clearToken, getRefreshToken } from '../services/apiClient';
 
 const AuthContext = createContext();
 
@@ -28,6 +28,7 @@ export function AuthProvider({ children }) {
     const loggedInUser = response.data;
 
     setToken(response.accessToken);
+    if (response.refreshToken) setRefreshToken(response.refreshToken);
     setUser(loggedInUser);
     localStorage.setItem('user', JSON.stringify(loggedInUser));
 
@@ -36,7 +37,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await authAPI.logout();
+      await authAPI.logout(getRefreshToken());
     } catch {
       // ignore errors on logout
     }

@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom'
 import MobileShell from '../../components/MobileShell'
 import { useState } from 'react'
-import { SkipBack, SkipForward, Play, Pause } from 'lucide-react'
+import { SkipBack, SkipForward, Play, Pause, AlertCircle } from 'lucide-react'
+import usePerk, { perkValues } from './usePerk'
 
 const tracks = [
   { num: 1, title: 'Golden Hours', duration: '03.07' },
@@ -12,18 +13,35 @@ const tracks = [
 
 export default function AudioPerk() {
   const navigate = useNavigate()
+  const perk = usePerk()
   const [playing, setPlaying] = useState(false)
   const [active, setActive] = useState(2)
+
+  const { name, description, url } = perkValues(perk, {
+    name: 'Exclusive EP',
+    description: 'A few exclusive tracks, just for you.',
+  })
 
   return (
     <MobileShell>
       <button onClick={() => navigate('/fan/perks')} className="text-sm text-gray-500 mb-5">← Back</button>
       <div className="card">
         <p className="text-xs font-bold text-primary mb-1">Exclusive Audio</p>
-        <h2 className="text-xl font-bold text-gray-900 mb-1">Running Low</h2>
-        <p className="text-sm text-gray-500 mb-5">Tap the code to copy it valid on all items in the Summer Collection.</p>
+        <h2 className="text-xl font-bold text-gray-900 mb-1">{name}</h2>
+        <p className="text-sm text-gray-500 mb-5">{description}</p>
 
-        {/* Waveform */}
+        {url ? (
+          <audio controls className="w-full mb-5">
+            <source src={url} />
+            Your browser does not support audio playback.
+          </audio>
+        ) : (
+          <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl mb-5 flex items-start gap-2">
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <span>This audio is still being prepared by the creator.</span>
+          </div>
+        )}
+
         <div className="bg-gray-50 rounded-2xl p-4 mb-4">
           <div className="flex items-end gap-0.5 h-14 mb-3">
             {Array.from({ length: 40 }).map((_, i) => {
@@ -39,7 +57,6 @@ export default function AudioPerk() {
           </div>
         </div>
 
-        {/* Controls */}
         <div className="flex items-center justify-center gap-4 mb-5">
           <button className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200">
             <SkipBack size={16} className="text-gray-600" />
@@ -55,7 +72,6 @@ export default function AudioPerk() {
           </button>
         </div>
 
-        {/* Track List */}
         <div className="space-y-2">
           {tracks.map(t => (
             <button key={t.num} onClick={() => setActive(t.num)}

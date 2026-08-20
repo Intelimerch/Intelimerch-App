@@ -3,8 +3,11 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://intelimerch-api-pr
 // ── Token management ──
 export const getToken = () => localStorage.getItem('accessToken');
 export const setToken = (token) => localStorage.setItem('accessToken', token);
+export const getRefreshToken = () => localStorage.getItem('refreshToken');
+export const setRefreshToken = (token) => localStorage.setItem('refreshToken', token);
 export const clearToken = () => {
   localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
   localStorage.removeItem('user');
 };
 
@@ -30,8 +33,49 @@ export class ApiError extends Error {
   }
 }
 
+// ── Silent refresh ──
+let refreshPromise = null;
+
+async function refreshTokens() {
+  if (refreshPromise) return refreshPromise;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    throw new ApiError('No refresh token available', 401, 'NO_REFRESH');
+  }
+
+  refreshPromise = (async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        clearToken();
+        throw new ApiError('Session expired', 401, 'SESSION_EXPIRED');
+      }
+      const data = await response.json();
+      setToken(data.accessToken);
+      if (data.refreshToken) setRefreshToken(data.refreshToken);
+      return data;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError('Session expired', 401, 'SESSION_EXPIRED');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
 // ── Generic API request ──
-export async function apiRequest(endpoint, options = {}) {
+export async function apiRequest(endpoint, options = {}, _retried = false) {
   const token = getToken();
 
   // Check if we're sending FormData (for file uploads)
@@ -73,25 +117,35 @@ export async function apiRequest(endpoint, options = {}) {
       
       const message = data.message || '';
       
-      // Only logout if the server explicitly says token expired/invalid
-      if (
+      const sessionExpired =
         message.includes('expired') || 
         message.includes('invalid token') || 
         message.includes('session expired') ||
         message.includes('jwt expired') ||
-        message.includes('token expired')
-      ) {
-        clearToken();
-        window.location.href = '/signin';
-        throw new ApiError('Your session has expired. Please login again.', 401, 'SESSION_EXPIRED');
+        message.includes('token expired');
+
+      // Session expired / invalid token: try a silent refresh once before logging out
+      if (sessionExpired && getRefreshToken() && !_retried) {
+        try {
+          await refreshTokens();
+          return apiRequest(endpoint, options, true);
+        } catch {
+          // refresh failed — fall through to logout below
+        }
       }
-      
-      // For other 401 errors (like permission issues), don't logout
-      throw new ApiError(
-        data.message || 'You are not authorized to perform this action.', 
-        401, 
-        'UNAUTHORIZED'
-      );
+
+      // For other 401 errors (permission issues, auth required), don't force logout
+      if (!sessionExpired) {
+        throw new ApiError(
+          data.message || 'You are not authorized to perform this action.',
+          401,
+          'UNAUTHORIZED'
+        );
+      }
+
+      clearToken();
+      window.location.href = '/signin';
+      throw new ApiError('Your session has expired. Please login again.', 401, 'SESSION_EXPIRED');
     }
 
     // ─── Handle non-JSON responses ───
@@ -157,22 +211,29 @@ export async function apiRequest(endpoint, options = {}) {
 }
 
 // ── HTTP methods ──
+// Bodies are JSON-stringified unless they are FormData (file uploads) or already strings.
+const serializeBody = (body) => {
+  if (body === undefined || body === null) return undefined;
+  if (body instanceof FormData || typeof body === 'string') return body;
+  return JSON.stringify(body);
+};
+
 export const api = {
   get: (endpoint) => apiRequest(endpoint, { method: 'GET' }),
   post: (endpoint, body) =>
     apiRequest(endpoint, {
       method: 'POST',
-      body: body ? JSON.stringify(body) : undefined,
+      body: serializeBody(body),
     }),
   put: (endpoint, body) =>
     apiRequest(endpoint, {
       method: 'PUT',
-      body: body ? JSON.stringify(body) : undefined,
+      body: serializeBody(body),
     }),
   patch: (endpoint, body) =>
     apiRequest(endpoint, {
       method: 'PATCH',
-      body: body ? JSON.stringify(body) : undefined,
+      body: serializeBody(body),
     }),
   delete: (endpoint) => apiRequest(endpoint, { method: 'DELETE' }),
 };
@@ -200,8 +261,19 @@ export const authAPI = {
   registerArtist: (data) =>
     api.post('/auth/register-artist', data),
 
-  logout: () =>
-    api.post('/auth/logout'),
+  forgotPassword: (identifier) => {
+    const trimmed = (identifier || '').trim();
+    const payload = trimmed.includes('@')
+      ? { email: trimmed }
+      : { phone: trimmed };
+    return api.post('/auth/forgot-password', payload);
+  },
+
+  resetPassword: (token, newPassword) =>
+    api.post('/auth/reset-password', { token, newPassword }),
+
+  logout: (refreshToken) =>
+    api.post('/auth/logout', refreshToken ? { refreshToken } : undefined),
 };
 
 // ── Perks APIs ──
@@ -266,4 +338,66 @@ export const campaignAPI = {
 
   createPage: (campaignId, data) =>
     api.post(`/campaigns/${campaignId}/pages`, data),
+
+  getAnalyticsOverview: () =>
+    api.get('/campaigns/analytics/overview'),
+
+  getAnalytics: (campaignId) =>
+    api.get(`/campaigns/${campaignId}/analytics`),
+
+  getNotifications: () =>
+    api.get('/campaigns/notifications'),
+
+  uploadPageMedia: (campaignId, formData) =>
+    apiRequest(`/campaigns/${campaignId}/pages/media`, {
+      method: 'POST',
+      body: formData,
+    }),
+
+  createTag: (campaignId) =>
+    api.post(`/campaigns/${campaignId}/tags`),
+};
+
+// ── Admin APIs ──
+export const adminAPI = {
+  getCreators: () =>
+    api.get('/admin/creators'),
+
+  getCampaigns: () =>
+    api.get('/admin/campaigns'),
+
+  getOverview: () =>
+    api.get('/admin/overview'),
+
+  getAnalytics: () =>
+    api.get('/admin/analytics'),
+
+  getTags: () =>
+    api.get('/tags'),
+
+  createCategory: (data) =>
+    api.post('/admin/perks/categories', data),
+};
+
+// ── Tags / Fan APIs (public NFC flow) ──
+export const tagsAPI = {
+  getByTag: (identifier) =>
+    api.get(`/tags/${encodeURIComponent(identifier)}`),
+
+  recordTap: (identifier) =>
+    api.post(`/tags/${encodeURIComponent(identifier)}/tap`),
+
+  getArtistTags: () =>
+    api.get('/tags/artist'),
+
+  deleteTag: (tagId) =>
+    api.delete(`/tags/${tagId}`),
+};
+
+export const fanAPI = {
+  activate: (data) =>
+    api.post('/fans/activate', data),
+
+  getFans: () =>
+    api.get('/fans'),
 };

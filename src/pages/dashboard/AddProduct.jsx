@@ -196,7 +196,6 @@ export default function AddProduct() {
       }
 
       const response = await productAPI.create(payload)
-      console.log('✅ Product created:', response)
 
       setSuccess(true)
 

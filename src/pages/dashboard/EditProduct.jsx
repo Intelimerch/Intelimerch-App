@@ -179,8 +179,6 @@ export default function EditProduct() {
           productTier: foundProduct.productTier || foundProduct.tier || '',
         })
 
-        console.log('📦 Product loaded:', foundProduct)
-        console.log('📝 Form data set:', formData)
 
       } catch (err) {
         console.error('Error loading product:', err)
@@ -236,7 +234,6 @@ export default function EditProduct() {
       }
 
       const response = await productAPI.update(productId, payload)
-      console.log('✅ Product updated:', response)
 
       setSuccess(true)
 

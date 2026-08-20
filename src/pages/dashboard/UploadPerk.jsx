@@ -9,6 +9,7 @@ const contentTypes = [
   { label: 'Image', value: 'image' },
   { label: 'Link', value: 'link' },
   { label: 'Document', value: 'document' },
+  { label: 'Discount', value: 'discount' },
 ]
 
 // ─── Professional Error Parser ──────────────────────────
@@ -26,6 +27,9 @@ function parseErrorMessage(error) {
       return 'Please select a valid content type.';
     }
     return 'Please check your input and try again.';
+  }
+  if (message.includes('discountCode')) {
+    return 'Please enter a valid discount code.';
   }
   if (message.includes('required')) {
     if (message.includes('perkName')) return 'Perk name is required.';
@@ -58,6 +62,7 @@ export default function UploadPerk() {
   const [selectedType, setSelectedType] = useState(null)
   const [selectedCampaign, setSelectedCampaign] = useState(null)
   const [description, setDescription] = useState('')
+  const [discountCode, setDiscountCode] = useState('')
   const [dragging, setDragging] = useState(false)
   const [fileName, setFileName] = useState('')
   const [file, setFile] = useState(null)
@@ -82,7 +87,6 @@ export default function UploadPerk() {
     async function loadCategories() {
       try {
         const res = await perksAPI.getCategories()
-        console.log('📦 Categories loaded:', res)
         setCategories(res.data || [])
       } catch (err) {
         console.error('Failed to load perk categories:', err)
@@ -100,7 +104,6 @@ export default function UploadPerk() {
       try {
         setLoadingCampaigns(true)
         const res = await campaignAPI.getAll()
-        console.log('📦 Campaigns loaded:', res)
         const list = Array.isArray(res.data) ? res.data : (res.data?.campaigns || [])
         setCampaigns(list)
       } catch (err) {
@@ -147,6 +150,10 @@ export default function UploadPerk() {
       setError('Please choose a content type')
       return
     }
+    if (selectedType.value === 'discount' && !discountCode.trim()) {
+      setError('Please enter a discount code')
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -157,6 +164,10 @@ export default function UploadPerk() {
       
       if (description.trim()) {
         formData.append('description', description.trim())
+      }
+
+      if (selectedType.value === 'discount') {
+        formData.append('discountCode', discountCode.trim())
       }
       
       if (selectedCampaign) {
@@ -170,7 +181,6 @@ export default function UploadPerk() {
       }
 
       const response = await perksAPI.create(formData)
-      console.log('✅ Perk created:', response)
       
       navigate('/dashboard/perks')
     } catch (err) {
@@ -315,7 +325,24 @@ export default function UploadPerk() {
             </div>
           </div>
 
+          {/* ─── Discount Code ─── */}
+          {selectedType?.value === 'discount' && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Discount Code <span className="text-red-500">*</span>
+              </label>
+              <input
+                className="input-field"
+                placeholder="e.g. SUMMER25"
+                value={discountCode}
+                onChange={(e) => setDiscountCode(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          )}
+
           {/* ─── Upload File ─── */}
+          {selectedType?.value !== 'discount' && (
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">Upload File</label>
             <label
@@ -331,6 +358,7 @@ export default function UploadPerk() {
               </span>
             </label>
           </div>
+          )}
 
           {/* ─── Link to Campaign ─── */}
           <div>

@@ -55,7 +55,6 @@ export default function Products() {
       setError(null)
       setUiError(null)
       const response = await productAPI.getAll()
-      console.log('📦 Products fetched:', JSON.stringify(response, null, 2))
       
       let productList = []
       if (Array.isArray(response.data)) {

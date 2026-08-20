@@ -28,16 +28,16 @@ export default function AlreadyClaimed() {
         </div>
 
         <h1 className="text-5xl font-black text-gray-900 leading-tight mb-4">HOLD UP</h1>
-        <p className="text-primary font-bold text-lg mb-3">This merch belongs to Nadine 🖐</p>
+        <p className="text-primary font-bold text-lg mb-3">This merch has already been claimed</p>
         <p className="text-gray-500 text-sm mb-10 leading-relaxed max-w-xs">
           This piece is registered to another fan. Each NFC tag is unique and tied to one person.
         </p>
 
-        <a href="https://intelimerch.app" className="btn-primary rounded-full py-4 text-base font-bold mb-10 w-full block text-center">
+        <a href={window.location.origin} className="btn-primary rounded-full py-4 text-base font-bold mb-10 w-full block text-center">
           Get Your Own Merch
         </a>
 
-        <p className="font-semibold text-gray-800 mb-4">But while you're here follow Jenny</p>
+        <p className="font-semibold text-gray-800 mb-4">But while you're here, follow the creator</p>
         <div className="flex flex-wrap gap-3 w-full justify-center">
           <a href={ig} target="_blank" rel="noreferrer"
             className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">

@@ -62,7 +62,6 @@ export default function Campaigns() {
       setError(null)
       setUiError(null)
       const response = await campaignAPI.getAll()
-      console.log('📦 Campaigns fetched:', response)
       const list = Array.isArray(response.data) ? response.data : (response.data?.campaigns || [])
       setCampaigns(list)
     } catch (err) {
@@ -136,9 +135,7 @@ export default function Campaigns() {
     setIsDeleting(true)
     setUiError(null)
     try {
-      console.log(`🗑️ Deleting campaign: ${campaignId}`)
       await campaignAPI.delete(campaignId)
-      console.log(`✅ Campaign deleted successfully`)
       await fetchCampaigns()
       setDeleteModal({ isOpen: false, campaignId: null, campaignName: '' })
     } catch (err) {
@@ -155,11 +152,14 @@ export default function Campaigns() {
   }
 
   // ─── Edit Campaign ───
+  const normalizeStatus = (s) =>
+    s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : 'Draft'
+
   const openEdit = (c) => {
     setUiError(null)
     setEditForm({
       name: c.campaignName || c.name,
-      status: c.status || 'Draft',
+      status: normalizeStatus(c.status),
       startDate: c.startDate?.split('T')[0] || '',
       endDate: c.endDate?.split('T')[0] || '',
     })
@@ -172,13 +172,14 @@ export default function Campaigns() {
     try {
       const updated = await campaignAPI.update(editingCampaign, {
         campaignName: editForm.name,
-        status: editForm.status,
+        status: editForm.status.toLowerCase(),
         startDate: editForm.startDate,
         endDate: editForm.endDate,
       })
+      const updatedData = updated?.data || updated
       setCampaigns(prev => prev.map(c =>
         (c.id === editingCampaign || c.campaignId === editingCampaign || c._id === editingCampaign)
-          ? { ...c, ...updated }
+          ? { ...c, ...updatedData }
           : c
       ))
       setEditingCampaign(null)
@@ -190,14 +191,28 @@ export default function Campaigns() {
   }
 
   // ─── Generate Link ───
-  const handleGenLink = (c) => {
-    const uid = `NFC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-    setGenLink({
-      campaign: c.campaignName || c.name,
-      url: `https://intelimerch.app/nfc/${uid}`,
-      id: uid
-    })
-    setOpenMenu(null)
+  const handleGenLink = async (c) => {
+    setUiError(null)
+    setGenLoading(true)
+    try {
+      const id = c.id || c.campaignId || c._id
+      const res = await campaignAPI.createTag(id)
+      const { tag, tagLink } = res.data || {}
+      const url = tagLink && tagLink.startsWith('http')
+        ? tagLink
+        : `${window.location.origin}/nfc/io/${tag?._id || ''}`
+      setGenLink({
+        campaign: c.campaignName || c.name,
+        url,
+        id: tag?.tagId || '',
+      })
+    } catch (err) {
+      console.error('❌ Error generating tag link:', err)
+      const friendlyMessage = parseErrorMessage(err)
+      setUiError(friendlyMessage)
+    } finally {
+      setOpenMenu(null)
+    }
   }
 
   const copyLink = () => {

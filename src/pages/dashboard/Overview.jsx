@@ -1,44 +1,80 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Wifi, UserPlus, MessageSquare, TrendingUp, TrendingDown, MoreHorizontal, Bell, Settings } from 'lucide-react'
+import { Wifi, UserPlus, MessageSquare, TrendingUp, TrendingDown, MoreHorizontal, Bell, Settings, Loader2, AlertCircle } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts'
+import { campaignAPI } from '../../services/apiClient'
+import { useAuth } from '../../context/AuthContext'
 
-const scanData = [
-  { month: 'Jan', scans: 320 }, { month: 'Feb', scans: 380 }, { month: 'Mar', scans: 420 },
-  { month: 'Apr', scans: 390 }, { month: 'May', scans: 450 }, { month: 'Jun', scans: 480 },
-  { month: 'Jul', scans: 520 }, { month: 'Aug', scans: 790 }, { month: 'Sep', scans: 680 },
-  { month: 'Oct', scans: 720 }, { month: 'Nov', scans: 760 }, { month: 'Dec', scans: 840 },
-]
-
-const locationData = [
-  { name: 'Lagos', value: 4800, color: '#16a34a' },
-  { name: 'Calabar', value: 4340, color: '#dc2626' },
-  { name: 'Benin City', value: 980, color: '#f59e0b' },
-  { name: 'Abuja', value: 1820, color: '#a78bfa' },
-  { name: 'PH', value: 741, color: '#06b6d4' },
-]
-
-const campaigns = [
-  { name: "Summer Drop '25", tag: 'TG-001', product: '4 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Active' },
-  { name: 'VIP Member Unlock', tag: 'TG-002', product: '2 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Active' },
-  { name: 'VIP Member Unlock', tag: 'TG-002', product: '2 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Paused' },
-]
+const LOCATION_COLORS = ['#16a34a', '#dc2626', '#f59e0b', '#a78bfa', '#06b6d4']
 
 export default function Overview() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [period, setPeriod] = useState('12 months')
+  const [campaigns, setCampaigns] = useState([])
+  const [analytics, setAnalytics] = useState({ scanData: [], topLocations: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const periods = ['12 months', '3 months', '30 days', '7 days', '24 hours']
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const [campRes, analyticsRes] = await Promise.all([
+          campaignAPI.getAll(),
+          campaignAPI.getAnalyticsOverview().catch(() => null),
+        ])
+        if (mounted) {
+          setCampaigns(Array.isArray(campRes.data) ? campRes.data : [])
+          if (analyticsRes?.data) {
+            const topLocations = (analyticsRes.data.topLocations || []).map((l, i) => ({
+              name: l.name,
+              value: l.value,
+              color: LOCATION_COLORS[i % LOCATION_COLORS.length],
+            }))
+            setAnalytics({
+              scanData: analyticsRes.data.scanData || [],
+              topLocations,
+            })
+          }
+        }
+      } catch (err) {
+        if (mounted) setError(err.message || 'Failed to load campaigns')
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
+  const totalScans = campaigns.reduce((s, c) => s + (c.taps || 0), 0)
+  const totalActivations = campaigns.reduce((s, c) => s + (c.claims || 0), 0)
+  const conversion = totalScans ? Math.round((totalActivations / totalScans) * 100) : 0
+  const repeatScans = Math.max(totalScans - totalActivations, 0)
+  const firstName = user?.firstName || 'there'
+  const hasScanData = analytics.scanData.some(d => d.scans > 0)
+
+  const rows = campaigns.map((c) => ({
+    name: c.campaignName,
+    tag: String(c._id).slice(-6).toUpperCase(),
+    product: `${c.products ?? 0} linked`,
+    date: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—',
+    scans: c.taps || 0,
+    conv: c.taps ? `${Math.round(((c.claims || 0) / c.taps) * 100)}%` : '—',
+    status: c.status ? c.status[0].toUpperCase() + c.status.slice(1) : 'Active',
+  }))
 
   return (
     <div>
-      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
-          <p className="text-gray-500 text-sm">Good morning, Jenny 👋</p>
+          <p className="text-gray-500 text-sm">Good morning, {firstName} 👋</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/dashboard/notifications')} className="relative p-2 hover:bg-gray-100 rounded-xl">
@@ -50,12 +86,22 @@ export default function Overview() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3 mb-6">
+          <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">{error}</p>
+            <button onClick={() => window.location.reload()} className="text-xs text-red-600 hover:text-red-800 mt-1 font-medium">Retry</button>
+          </div>
+        </div>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total NFC Scans" value="13,468" trend="+18% vs last month" up icon={<Wifi size={18} className="text-teal-500" />} bg="bg-teal-50" />
-        <StatCard label="Unique Activations" value="8,210" trend="+12% vs last month" up icon={<UserPlus size={18} className="text-violet-500" />} bg="bg-violet-50" />
-        <StatCard label="Repeat Scans" value="5,258" trend="+7% vs last month" up icon={<MessageSquare size={18} className="text-orange-400" />} bg="bg-orange-50" />
-        <StatCard label="Conversion Rate" value="24" trend="7% vs last month" up={false} icon={<TrendingDown size={18} className="text-blue-400" />} bg="bg-blue-50" />
+        <StatCard label="Total NFC Scans" value={loading ? '—' : totalScans.toLocaleString()} trend="Across all campaigns" up icon={<Wifi size={18} className="text-teal-500" />} bg="bg-teal-50" />
+        <StatCard label="Unique Activations" value={loading ? '—' : totalActivations.toLocaleString()} trend="Registered fans" up icon={<UserPlus size={18} className="text-violet-500" />} bg="bg-violet-50" />
+        <StatCard label="Repeat Scans" value={loading ? '—' : repeatScans.toLocaleString()} trend="Re-taps" up icon={<MessageSquare size={18} className="text-orange-400" />} bg="bg-orange-50" />
+        <StatCard label="Conversion Rate" value={loading ? '—' : `${conversion}%`} trend="Activations / scans" up icon={<TrendingUp size={18} className="text-blue-400" />} bg="bg-blue-50" />
       </div>
 
       {/* Charts Row */}
@@ -73,37 +119,55 @@ export default function Overview() {
               </button>
             ))}
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={scanData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
-              <Line type="monotone" dataKey="scans" stroke="#F5A623" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: '#F5A623' }} />
-            </LineChart>
-          </ResponsiveContainer>
+          {loading ? (
+            <div className="flex items-center justify-center h-[180px]">
+              <Loader2 size={24} className="text-primary animate-spin" />
+            </div>
+          ) : !hasScanData ? (
+            <p className="text-sm text-gray-400 py-10 text-center">No scan data yet. Scans appear here once fans tap your NFC tags.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={analytics.scanData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+                <Line type="monotone" dataKey="scans" stroke="#F5A623" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: '#F5A623' }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
         <div className="card">
           <h3 className="font-semibold text-gray-800 mb-4">Top Locations</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={locationData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">
-                {locationData.map((e, i) => <Cell key={i} fill={e.color} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-1 mt-2">
-            {locationData.map(l => (
-              <div key={l.name} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
-                  <span className="text-gray-600">{l.name}</span>
-                </div>
-                <span className="font-medium text-gray-800">{l.value.toLocaleString()}</span>
+          {loading ? (
+            <div className="flex items-center justify-center h-[200px]">
+              <Loader2 size={24} className="text-primary animate-spin" />
+            </div>
+          ) : analytics.topLocations.length === 0 ? (
+            <p className="text-sm text-gray-400 py-10 text-center">No location data yet.</p>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={analytics.topLocations} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">
+                    {analytics.topLocations.map((e, i) => <Cell key={i} fill={e.color} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-1 mt-2">
+                {analytics.topLocations.map(l => (
+                  <div key={l.name} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
+                      <span className="text-gray-600">{l.name}</span>
+                    </div>
+                    <span className="font-medium text-gray-800">{l.value.toLocaleString()}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -111,36 +175,44 @@ export default function Overview() {
       <div className="card">
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-gray-800">Campaign Performance</h3>
-          <button className="text-primary text-sm font-semibold hover:underline">View All</button>
+          <button onClick={() => navigate('/dashboard/campaigns')} className="text-primary text-sm font-semibold hover:underline">View All</button>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-400 text-xs font-medium">
-              <th className="text-left pb-3">Campaign Name</th>
-              <th className="text-left pb-3">Tag Group</th>
-              <th className="text-left pb-3">Product</th>
-              <th className="text-left pb-3">Date Created</th>
-              <th className="text-left pb-3">Scans</th>
-              <th className="text-left pb-3">Conv.</th>
-              <th className="text-left pb-3">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {campaigns.map((c, i) => (
-              <tr key={i} className="hover:bg-gray-50/50">
-                <td className="py-3.5 font-medium text-gray-800">{c.name}</td>
-                <td className="py-3.5 text-gray-500">{c.tag}</td>
-                <td className="py-3.5 text-gray-500">{c.product}</td>
-                <td className="py-3.5 text-gray-500">{c.date}</td>
-                <td className="py-3.5 text-gray-700">{c.scans.toLocaleString()}</td>
-                <td className="py-3.5 text-gray-700">{c.conv}</td>
-                <td className="py-3.5">
-                  <StatusBadge status={c.status} />
-                </td>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={28} className="text-primary animate-spin" />
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">No campaigns yet. Create your first campaign to get started.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-gray-400 text-xs font-medium">
+                <th className="text-left pb-3">Campaign Name</th>
+                <th className="text-left pb-3">Tag Group</th>
+                <th className="text-left pb-3">Product</th>
+                <th className="text-left pb-3">Date Created</th>
+                <th className="text-left pb-3">Scans</th>
+                <th className="text-left pb-3">Conv.</th>
+                <th className="text-left pb-3">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rows.map((c, i) => (
+                <tr key={i} className="hover:bg-gray-50/50">
+                  <td className="py-3.5 font-medium text-gray-800">{c.name}</td>
+                  <td className="py-3.5 text-gray-500">{c.tag}</td>
+                  <td className="py-3.5 text-gray-500">{c.product}</td>
+                  <td className="py-3.5 text-gray-500">{c.date}</td>
+                  <td className="py-3.5 text-gray-700">{c.scans.toLocaleString()}</td>
+                  <td className="py-3.5 text-gray-700">{c.conv}</td>
+                  <td className="py-3.5">
+                    <StatusBadge status={c.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

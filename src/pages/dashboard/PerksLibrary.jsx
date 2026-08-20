@@ -97,7 +97,6 @@ export default function PerksLibrary() {
       setError(null);
       setUiError(null);
       const response = await perksAPI.getAll();
-      console.log("Perks fetched:", response);
       setPerks(response.data || response || []);
     } catch (err) {
       console.error("Error fetching perks:", err);
@@ -126,9 +125,7 @@ export default function PerksLibrary() {
     setIsDeleting(true);
     setUiError(null);
     try {
-      console.log(`🗑️ Deleting perk: ${perkId}`);
       await perksAPI.remove(perkId);
-      console.log(`✅ Perk deleted successfully`);
       await fetchPerks();
       setDeleteModal({ isOpen: false, perkId: null, perkName: '' });
     } catch (err) {
@@ -168,7 +165,6 @@ export default function PerksLibrary() {
       }
 
       const updated = await perksAPI.update(id, formData);
-      console.log("Update response:", updated);
       await fetchPerks();
       closeEdit();
     } catch (err) {

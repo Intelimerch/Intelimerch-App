@@ -6,6 +6,7 @@ import { useAuth } from './context/AuthContext'
 import SignUp from './pages/auth/SignUp'
 import SignIn from './pages/auth/SignIn'
 import ForgotPassword from './pages/auth/ForgotPassword'
+import ResetPassword from './pages/auth/ResetPassword'
 import VerifyAccount from './pages/auth/VerifyAccount'
 
 // Dashboard Pages (Creator)
@@ -25,6 +26,7 @@ import Notifications from './pages/dashboard/Notifications'
 import EditProduct from './pages/dashboard/EditProduct'
 
 // Fan Pages (Mobile)
+import NfcEntry from './pages/fan/NfcEntry'
 import ActivateMerch from './pages/fan/ActivateMerch'
 import Activated from './pages/fan/Activated'
 import AlreadyClaimed from './pages/fan/AlreadyClaimed'
@@ -38,6 +40,7 @@ import LinkPerk from './pages/fan/LinkPerk'
 
 // New Dashboard Pages
 import CampaignAnalytics from './pages/dashboard/CampaignAnalytics'
+import Analytics from './pages/dashboard/Analytics'
 
 // Admin Pages
 import AdminLayout from './components/AdminLayout'
@@ -88,6 +91,7 @@ export default function App() {
           <Route path="/signup" element={<SignUp />} />
           <Route path="/signin" element={<SignIn />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verify" element={<VerifyAccount />} />
 
           {/* Creator Dashboard - Protected */}
@@ -108,11 +112,14 @@ export default function App() {
             <Route path="perks" element={<PerksLibrary />} />
             <Route path="perks/upload" element={<UploadPerk />} />
             <Route path="tag-groups" element={<TagGroups />} />
+            <Route path="analytics" element={<Analytics />} />
             <Route path="profile" element={<Profile />} />
             <Route path="notifications" element={<Notifications />} />
           </Route>
 
           {/* Fan (mobile) */}
+          <Route path="/nfc/io/:identifier" element={<NfcEntry />} />
+          <Route path="/nfc/:identifier" element={<NfcEntry />} />
           <Route path="/fan/activate" element={<ActivateMerch />} />
           <Route path="/fan/activated" element={<Activated />} />
           <Route path="/fan/claimed" element={<AlreadyClaimed />} />

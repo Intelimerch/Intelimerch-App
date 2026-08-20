@@ -176,10 +176,8 @@ export default function SignUp() {
         payload.middleName = formData.middleName.trim()
       }
 
-      console.log('📤 Sending payload:', payload)
 
       const response = await register(payload)
-      console.log('✅ Registration response:', response)
 
       navigate('/verify', { state: { email: formData.email } })
     } catch (err) {

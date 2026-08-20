@@ -12,8 +12,8 @@ const navItems = [
   { to: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
   { to: '/dashboard/products', label: 'Products', icon: Package },
   { to: '/dashboard/perks', label: 'Perks Library', icon: Gift },
-  // { to: '/dashboard/tag-groups', label: 'Tag Groups', icon: Tag },
-  // { to: '/dashboard/analytics', label: 'Analytics', icon: BarChart2 },
+  { to: '/dashboard/tag-groups', label: 'Tag Groups', icon: Tag },
+  { to: '/dashboard/analytics', label: 'Analytics', icon: BarChart2 },
   { to: '/dashboard/fans', label: 'Fans', icon: Users },
   { to: '/dashboard/profile', label: 'Profile', icon: User },
 ]

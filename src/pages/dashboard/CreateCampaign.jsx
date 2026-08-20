@@ -44,6 +44,7 @@ export default function CreateCampaign() {
   const [selectedPerkIds, setSelectedPerkIds] = useState([])
   const [perksOpen, setPerksOpen] = useState(false)
   const [loadingPerks, setLoadingPerks] = useState(true)
+  const [mediaFile, setMediaFile] = useState(null)
 
   useEffect(() => {
     async function loadPerks() {
@@ -71,9 +72,6 @@ export default function CreateCampaign() {
     if (success) setSuccess(false)
   }
 
-  const buildDummyMediaUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || 'campaign-media')}`
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     setFieldErrors({})
@@ -88,20 +86,31 @@ export default function CreateCampaign() {
 
     setLoading(true)
     try {
-      const payload = {
+      const base = {
         campaignName: campaignName.trim(),
         perks: selectedPerkIds,
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
-        mediaType,
-        // No campaign media upload endpoint exists yet — placeholder URL
-        // until the backend provides real upload/storage for this.
-        mediaUrl: buildDummyMediaUrl(mediaFileName),
         status,
       }
 
-      const response = await campaignAPI.create(payload)
-      console.log('✅ Campaign created:', response)
+      let response
+      if (mediaFile) {
+        // Real multipart upload: mediaType only when a file is selected,
+        // otherwise the backend rejects the request with "Media file is missing".
+        const fd = new FormData()
+        fd.append('media', mediaFile)
+        fd.append('mediaType', mediaType)
+        Object.entries(base).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) {
+            fd.append(k, Array.isArray(v) ? JSON.stringify(v) : String(v))
+          }
+        })
+        response = await campaignAPI.create(fd)
+      } else {
+        response = await campaignAPI.create(base)
+      }
+
       setSuccess(true)
 
       // Capture the real campaign id so the next step (building the
@@ -192,7 +201,6 @@ export default function CreateCampaign() {
                 <option value="active">Active</option>
                 <option value="draft">Draft</option>
                 <option value="paused">Paused</option>
-                <option value="completed">Completed</option>
               </select>
               <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
@@ -224,13 +232,17 @@ export default function CreateCampaign() {
               <input
                 type="file"
                 className="hidden"
-                onChange={(e) => setMediaFileName(e.target.files?.[0]?.name || '')}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null
+                  setMediaFile(file)
+                  setMediaFileName(file?.name || '')
+                }}
                 disabled={loading || success}
               />
               <span className="text-sm text-gray-500">{mediaFileName || 'Tap to upload campaign banner'}</span>
             </label>
             <p className="text-xs text-gray-400 mt-1">
-              No media upload endpoint yet — this sends a placeholder URL for testing.
+              Media is uploaded and stored securely.
             </p>
           </div>
 
