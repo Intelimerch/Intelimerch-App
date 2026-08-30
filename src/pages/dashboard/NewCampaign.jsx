@@ -1,3 +1,4 @@
+// src/pages/dashboard/NewCampaign.jsx
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -6,6 +7,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { campaignAPI } from "../../services/apiClient";
+import { useFormPersistence } from "../../hooks/useFormPersistence";
 
 const blockTypes = [
   { type: "Header", icon: Type, color: "text-violet-500" },
@@ -38,7 +40,7 @@ function PublishSuccessModal({ isOpen, onClose, campaignName, onDone }) {
               </svg>
             </div>
           </div>
-          <h2 className="text-xl font-bold text-gray-900 text-center mb-2">Campaign Page Published!</h2>
+          <h2 className="text-xl font-bold text-gray-900 text-center mb-2">Campaign Published!</h2>
           <p className="text-sm text-gray-500 text-center mb-6">
             <span className="text-amber-500 font-semibold">{campaignName}</span>'s page is now live.
           </p>
@@ -56,7 +58,10 @@ export default function NewCampaign() {
   const initialCampaignName = location.state?.campaignName || "New Campaign Page";
 
   const [tab, setTab] = useState("canvas");
-  const [blocks, setBlocks] = useState(defaultBlocks);
+  
+  // ✅ Use useFormPersistence for blocks (survives refresh, clears on navigation away)
+  const [blocks, setBlocks, clearSavedBlocks] = useFormPersistence("artist_campaign_blocks", defaultBlocks);
+  
   const [editingId, setEditingId] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -93,27 +98,27 @@ export default function NewCampaign() {
       Header: "New Header", Text: "Add your text here...", Button: "Click Me",
       Image: null, Video: null, Audio: null, Footer: "© 2026 · Powered by InteliMerch",
     };
-    setBlocks(b => [...b, { id: Date.now(), type, content: defaults[type] || "", meta: {} }]);
+    setBlocks(prev => [...prev, { id: Date.now(), type, content: defaults[type] || "", meta: {} }]);
   };
 
   const duplicateBlock = (id) => {
-    setBlocks(b => {
-      const idx = b.findIndex(x => x.id === id);
-      if (idx === -1) return b;
-      const copy = { ...b[idx], id: Date.now() };
-      const next = [...b];
+    setBlocks(prev => {
+      const idx = prev.findIndex(x => x.id === id);
+      if (idx === -1) return prev;
+      const copy = { ...prev[idx], id: Date.now() };
+      const next = [...prev];
       next.splice(idx + 1, 0, copy);
       return next;
     });
   };
 
-  const removeBlock = (id) => setBlocks(b => b.filter(x => x.id !== id));
+  const removeBlock = (id) => setBlocks(prev => prev.filter(x => x.id !== id));
 
   const updateBlock = (id, field, value) => {
     if (field === "content") {
-      setBlocks(b => b.map(x => x.id === id ? { ...x, content: value } : x));
+      setBlocks(prev => prev.map(x => x.id === id ? { ...x, content: value } : x));
     } else {
-      setBlocks(b => b.map(x => x.id === id ? { ...x, meta: { ...x.meta, [field]: value } } : x));
+      setBlocks(prev => prev.map(x => x.id === id ? { ...x, meta: { ...x.meta, [field]: value } } : x));
     }
   };
 
@@ -146,12 +151,14 @@ export default function NewCampaign() {
 
     setPublishing(true);
     try {
-      // Fully flexible page structure — backend just stores this JSON as-is
-      // and returns it for rendering. No fixed section types required.
       const pageStructure = { blocks };
 
       const response = await campaignAPI.createPage(campaignId, { pageStructure });
       console.log("✅ Campaign page created:", response);
+      
+      // ✅ Clear saved blocks after successful publish
+      clearSavedBlocks();
+      
       setShowSuccessModal(true);
     } catch (err) {
       console.error("❌ Error publishing campaign page:", err);
@@ -162,9 +169,13 @@ export default function NewCampaign() {
   };
 
   const handleSaveDraft = () => {
-    // No draft-save endpoint exists yet — this is local only for now.
     console.log("Draft (local only):", { campaignId, blocks });
     alert("Draft saved locally — there's no backend draft endpoint yet, so this isn't persisted remotely.");
+  };
+
+  const handleBack = () => {
+    clearSavedBlocks(); // ✅ Clear when navigating away
+    navigate("/dashboard/campaigns");
   };
 
   if (!initialCampaignId && campaigns.length === 0 && !loadingCampaigns) {
@@ -253,7 +264,7 @@ export default function NewCampaign() {
                 {publishing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                 {publishing ? "Publishing..." : "Publish"}
               </button>
-              <button onClick={() => navigate("/dashboard/campaigns")} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all flex items-center gap-2">
+              <button onClick={handleBack} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all flex items-center gap-2">
                 <ArrowLeft size={14} /> Back
               </button>
             </div>

@@ -1,78 +1,102 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Calendar, ChevronDown, Plus, ArrowLeft, Loader2, AlertCircle, CheckCircle, Check } from 'lucide-react'
-import { campaignAPI, perksAPI } from '../../services/apiClient'
+// src/pages/dashboard/CreateCampaign.jsx
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Calendar,
+  ChevronDown,
+  Plus,
+  ArrowLeft,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  Check,
+} from "lucide-react";
+import { campaignAPI, perksAPI } from "../../services/apiClient";
+import { useFormPersistence } from "../../hooks/useFormPersistence";
 
-// NOTE: only "image" is confirmed from Swagger's example. "video" is a
-// guess based on how perk contentType works — confirm with backend dev
-// before relying on this for real campaigns.
-const mediaTypes = ['image', 'video']
+const mediaTypes = ["image", "video", "link"];
 
 function validateCampaign(data) {
-  const errors = {}
+  const errors = {};
   if (!data.campaignName || data.campaignName.trim().length === 0) {
-    errors.campaignName = 'Campaign name is required'
+    errors.campaignName = "Campaign name is required";
   } else if (data.campaignName.trim().length < 2) {
-    errors.campaignName = 'Campaign name must be at least 2 characters'
+    errors.campaignName = "Campaign name must be at least 2 characters";
   }
-  if (!data.startDate) errors.startDate = 'Start date is required'
-  if (!data.endDate) errors.endDate = 'End date is required'
+  if (!data.startDate) errors.startDate = "Start date is required";
+  if (!data.endDate) errors.endDate = "End date is required";
   if (data.startDate && data.endDate && data.startDate > data.endDate) {
-    errors.endDate = 'End date must be after start date'
+    errors.endDate = "End date must be after start date";
   }
   if (!data.selectedPerkIds || data.selectedPerkIds.length === 0) {
-    errors.perks = 'Select at least one perk'
+    errors.perks = "Select at least one perk";
   }
-  return errors
+  return errors;
 }
 
 export default function CreateCampaign() {
-  const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
-  const [apiError, setApiError] = useState(null)
-  const [fieldErrors, setFieldErrors] = useState({})
-  const [success, setSuccess] = useState(false)
+  const navigate = useNavigate();
+  
+  // ✅ Use useFormPersistence with sessionStorage (survives refresh)
+  const [formData, setFormData, clearSavedForm] = useFormPersistence("artist_create_campaign", {
+    campaignName: "",
+    status: "active",
+    startDate: "",
+    endDate: "",
+    mediaType: "image",
+    mediaFileName: "",
+    mediaUrl: "",
+    selectedPerkIds: [],
+  });
 
-  const [campaignName, setCampaignName] = useState('')
-  const [status, setStatus] = useState('active')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [mediaType, setMediaType] = useState('image')
-  const [mediaFileName, setMediaFileName] = useState('')
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [success, setSuccess] = useState(false);
 
-  const [perks, setPerks] = useState([])
-  const [selectedPerkIds, setSelectedPerkIds] = useState([])
-  const [perksOpen, setPerksOpen] = useState(false)
-  const [loadingPerks, setLoadingPerks] = useState(true)
+  const [perks, setPerks] = useState([]);
+  const [perksOpen, setPerksOpen] = useState(false);
+  const [loadingPerks, setLoadingPerks] = useState(true);
 
   useEffect(() => {
     async function loadPerks() {
       try {
-        const res = await perksAPI.getAll()
-        setPerks(res.data || [])
+        const res = await perksAPI.getAll();
+        setPerks(res.data || []);
       } catch (err) {
-        console.error('Failed to load perks:', err)
+        console.error("Failed to load perks:", err);
       } finally {
-        setLoadingPerks(false)
+        setLoadingPerks(false);
       }
     }
-    loadPerks()
-  }, [])
+    loadPerks();
+  }, []);
 
   const togglePerk = (id) => {
-    setSelectedPerkIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-  }
+    setFormData(prev => ({
+      ...prev,
+      selectedPerkIds: prev.selectedPerkIds.includes(id)
+        ? prev.selectedPerkIds.filter(x => x !== id)
+        : [...prev.selectedPerkIds, id]
+    }));
+  };
 
   const handleChange = (field, value) => {
-    const setters = { campaignName: setCampaignName, status: setStatus, startDate: setStartDate, endDate: setEndDate }
-    if (setters[field]) setters[field](value)
-    if (fieldErrors[field]) setFieldErrors(prev => ({ ...prev, [field]: null }))
-    if (apiError) setApiError(null)
-    if (success) setSuccess(false)
-  }
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (fieldErrors[field])
+      setFieldErrors(prev => ({ ...prev, [field]: null }));
+    if (apiError) setApiError(null);
+    if (success) setSuccess(false);
+  };
 
   const buildDummyMediaUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || 'campaign-media')}`
+    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || "campaign-media")}`;
+
+  // ✅ Clear form when navigating back
+  const handleBack = () => {
+    clearSavedForm();
+    navigate("/dashboard/campaigns");
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -80,33 +104,41 @@ export default function CreateCampaign() {
     setApiError(null)
     setSuccess(false)
 
-    const errors = validateCampaign({ campaignName, startDate, endDate, selectedPerkIds })
+    const errors = validateCampaign(formData)
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors)
       return
     }
 
+    // Resolve mediaUrl BEFORE building payload
+    let resolvedMediaUrl = 'https://placeholder.intelimerch.com/campaign-default.jpg'
+    if (formData.mediaType === 'link' && formData.mediaUrl) {
+      resolvedMediaUrl = formData.mediaUrl
+    } else if ((formData.mediaType === 'image' || formData.mediaType === 'video') && formData.mediaFileName) {
+      resolvedMediaUrl = buildDummyMediaUrl(formData.mediaFileName)
+    }
+
     setLoading(true)
     try {
       const payload = {
-        campaignName: campaignName.trim(),
-        perks: selectedPerkIds,
-        startDate: new Date(startDate).toISOString(),
-        endDate: new Date(endDate).toISOString(),
-        mediaType,
-        // No campaign media upload endpoint exists yet — placeholder URL
-        // until the backend provides real upload/storage for this.
-        mediaUrl: buildDummyMediaUrl(mediaFileName),
-        status,
+        campaignName: formData.campaignName.trim(),
+        perks: formData.selectedPerkIds,
+        startDate: new Date(formData.startDate).toISOString(),
+        endDate: new Date(formData.endDate).toISOString(),
+        mediaType: formData.mediaType,
+        mediaUrl: resolvedMediaUrl,
+        status: formData.status,
       }
+
+      console.log('📤 Sending payload:', payload)
 
       const response = await campaignAPI.create(payload)
       console.log('✅ Campaign created:', response)
       setSuccess(true)
 
-      // Capture the real campaign id so the next step (building the
-      // campaign page) knows which campaign to attach sections to.
-      // The backend returns the created object under "campaign", not "data".
+      // ✅ Clear saved form after successful creation
+      clearSavedForm()
+
       const newCampaignId =
         response.campaign?._id ||
         response.campaign?.id ||
@@ -116,7 +148,7 @@ export default function CreateCampaign() {
 
       setTimeout(() => {
         navigate('/dashboard/campaigns/new', {
-          state: { campaignId: newCampaignId, campaignName: campaignName.trim() }
+          state: { campaignId: newCampaignId, campaignName: formData.campaignName.trim() }
         })
       }, 1000)
     } catch (err) {
@@ -133,172 +165,227 @@ export default function CreateCampaign() {
         <AlertCircle size={14} />
         <span>{fieldErrors[field]}</span>
       </div>
-    ) : null
+    ) : null;
 
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-6 w-full">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Create New Campaign</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Create New Campaign
+          </h1>
           <p className="text-gray-500 text-sm">Create a new campaign</p>
         </div>
-        <button onClick={() => navigate('/dashboard/campaigns')} className="btn-outline w-auto px-5 text-sm">
+        <button
+          onClick={handleBack}
+          className="btn-outline w-auto px-5 text-sm"
+        >
           <ArrowLeft size={14} /> Back
         </button>
       </div>
 
       <div className="w-full max-w-xl mx-auto">
-      <div className="card w-full">
-        <form onSubmit={handleSubmit} className="space-y-6 w-full">
-          {apiError && (
-            <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
-              <AlertCircle size={18} className="shrink-0 mt-0.5" />
-              <span>{apiError}</span>
-            </div>
-          )}
-          {success && (
-            <div className="bg-green-50 text-green-600 text-sm p-3 rounded-xl flex items-start gap-2">
-              <CheckCircle size={18} className="shrink-0 mt-0.5" />
-              <span>Campaign created successfully! Redirecting...</span>
-            </div>
-          )}
+        <div className="card w-full">
+          <form onSubmit={handleSubmit} className="space-y-6 w-full">
+            {apiError && (
+              <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
+                <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                <span>{apiError}</span>
+              </div>
+            )}
+            {success && (
+              <div className="bg-green-50 text-green-600 text-sm p-3 rounded-xl flex items-start gap-2">
+                <CheckCircle size={18} className="shrink-0 mt-0.5" />
+                <span>Campaign created successfully! Redirecting...</span>
+              </div>
+            )}
 
-          {/* Campaign Name */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-              Campaign Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              className={`input-field w-full ${fieldErrors.campaignName ? 'border-red-500 focus:ring-red-500' : ''}`}
-              placeholder="enter campaign name"
-              value={campaignName}
-              onChange={(e) => handleChange('campaignName', e.target.value)}
-              disabled={loading || success}
-            />
-            {renderError('campaignName')}
-          </div>
-
-          {/* Status */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Campaign Status</label>
-            <div className="relative">
-              <select
-                value={status}
-                onChange={(e) => handleChange('status', e.target.value)}
-                className="input-field w-full appearance-none pr-10"
-                disabled={loading || success}
-              >
-                <option value="active">Active</option>
-                <option value="draft">Draft</option>
-                <option value="paused">Paused</option>
-                <option value="completed">Completed</option>
-              </select>
-              <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </div>
-
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-4">
-            <DateField label="Start Date" value={startDate} onChange={(v) => handleChange('startDate', v)} error={fieldErrors.startDate} disabled={loading || success} />
-            <DateField label="End Date" value={endDate} onChange={(v) => handleChange('endDate', v)} error={fieldErrors.endDate} disabled={loading || success} />
-          </div>
-
-          {/* Media */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Campaign Media</label>
-            <div className="flex gap-2 mb-2">
-              {mediaTypes.map(t => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setMediaType(t)}
-                  disabled={loading || success}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${mediaType === t ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Campaign Name <span className="text-red-500">*</span>
+              </label>
               <input
-                type="file"
-                className="hidden"
-                onChange={(e) => setMediaFileName(e.target.files?.[0]?.name || '')}
+                type="text"
+                className={`input-field w-full ${fieldErrors.campaignName ? "border-red-500 focus:ring-red-500" : ""}`}
+                placeholder="enter campaign name"
+                value={formData.campaignName}
+                onChange={(e) => handleChange("campaignName", e.target.value)}
                 disabled={loading || success}
               />
-              <span className="text-sm text-gray-500">{mediaFileName || 'Tap to upload campaign banner'}</span>
-            </label>
-            <p className="text-xs text-gray-400 mt-1">
-              No media upload endpoint yet — this sends a placeholder URL for testing.
-            </p>
-          </div>
+              {renderError("campaignName")}
+            </div>
 
-          {/* Perks */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-              Link Perks <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setPerksOpen(o => !o)}
-                disabled={loadingPerks || loading || success}
-                className="input-field w-full text-left flex items-center justify-between"
-              >
-                <span className={selectedPerkIds.length ? 'text-gray-800' : 'text-gray-400'}>
-                  {loadingPerks
-                    ? 'Loading perks...'
-                    : selectedPerkIds.length
-                      ? `${selectedPerkIds.length} perk${selectedPerkIds.length > 1 ? 's' : ''} selected`
-                      : 'Select perks to link to this campaign'}
-                </span>
-                <ChevronDown size={15} className="text-gray-400 shrink-0" />
-              </button>
-              {perksOpen && (
-                <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
-                  {perks.length === 0 ? (
-                    <p className="px-4 py-2.5 text-sm text-gray-400">No perks found</p>
-                  ) : (
-                    perks.map((perk) => (
-                      <button
-                        key={perk._id}
-                        type="button"
-                        onClick={() => togglePerk(perk._id)}
-                        className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                      >
-                        <div className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${selectedPerkIds.includes(perk._id) ? 'bg-primary border-primary' : 'border-gray-300'}`}>
-                          {selectedPerkIds.includes(perk._id) && <Check size={10} className="text-white" />}
-                        </div>
-                        {perk.perkName}
-                      </button>
-                    ))
-                  )}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Campaign Status
+              </label>
+              <div className="relative">
+                <select
+                  value={formData.status}
+                  onChange={(e) => handleChange("status", e.target.value)}
+                  className="input-field w-full appearance-none pr-10"
+                  disabled={loading || success}
+                >
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="paused">Paused</option>
+                  <option value="completed">Completed</option>
+                </select>
+                <ChevronDown
+                  size={16}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <DateField
+                label="Start Date"
+                value={formData.startDate}
+                onChange={(v) => handleChange("startDate", v)}
+                error={fieldErrors.startDate}
+                disabled={loading || success}
+              />
+              <DateField
+                label="End Date"
+                value={formData.endDate}
+                onChange={(v) => handleChange("endDate", v)}
+                error={fieldErrors.endDate}
+                disabled={loading || success}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Campaign Media
+              </label>
+              <div className="flex gap-2 mb-2">
+                {mediaTypes.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => handleChange("mediaType", t)}
+                    disabled={loading || success}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${formData.mediaType === t ? "bg-primary text-white" : "bg-gray-100 text-gray-600"}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+
+              {formData.mediaType === "image" || formData.mediaType === "video" ? (
+                <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => handleChange("mediaFileName", e.target.files?.[0]?.name || "")}
+                    disabled={loading || success}
+                  />
+                  <span className="text-sm text-gray-500">
+                    {formData.mediaFileName || "Tap to upload campaign banner"}
+                  </span>
+                </label>
+              ) : (
+                <input
+                  type="url"
+                  className="input-field w-full"
+                  placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
+                  value={formData.mediaUrl}
+                  onChange={(e) => handleChange("mediaUrl", e.target.value)}
+                  disabled={loading || success}
+                />
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                {formData.mediaType === "link"
+                  ? "Provide a direct URL to your media"
+                  : "Upload a file for your campaign banner"}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Link Perks <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setPerksOpen((o) => !o)}
+                  disabled={loadingPerks || loading || success}
+                  className="input-field w-full text-left flex items-center justify-between"
+                >
+                  <span
+                    className={
+                      formData.selectedPerkIds.length ? "text-gray-800" : "text-gray-400"
+                    }
+                  >
+                    {loadingPerks
+                      ? "Loading perks..."
+                      : formData.selectedPerkIds.length
+                        ? `${formData.selectedPerkIds.length} perk${formData.selectedPerkIds.length > 1 ? "s" : ""} selected`
+                        : "Select perks to link to this campaign"}
+                  </span>
+                  <ChevronDown size={15} className="text-gray-400 shrink-0" />
+                </button>
+                {perksOpen && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
+                    {perks.length === 0 ? (
+                      <p className="px-4 py-2.5 text-sm text-gray-400">
+                        No perks found
+                      </p>
+                    ) : (
+                      perks.map((perk) => (
+                        <button
+                          key={perk._id}
+                          type="button"
+                          onClick={() => togglePerk(perk._id)}
+                          className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                        >
+                          <div
+                            className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${formData.selectedPerkIds.includes(perk._id) ? "bg-primary border-primary" : "border-gray-300"}`}
+                          >
+                            {formData.selectedPerkIds.includes(perk._id) && (
+                              <Check size={10} className="text-white" />
+                            )}
+                          </div>
+                          {perk.perkName}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+              {fieldErrors.perks && (
+                <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
+                  <AlertCircle size={14} />
+                  <span>{fieldErrors.perks}</span>
                 </div>
               )}
             </div>
-            {fieldErrors.perks && (
-              <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
-                <AlertCircle size={14} />
-                <span>{fieldErrors.perks}</span>
-              </div>
-            )}
-          </div>
 
-          <button
-            type="submit"
-            className="flex items-center gap-2 px-6 py-3 text-sm font-medium text-white bg-primary rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={loading || success}
-          >
-            {loading ? (<><Loader2 size={18} className="animate-spin" /> Creating...</>)
-              : success ? (<><CheckCircle size={18} /> Created!</>)
-              : (<><Plus size={18} /> Create Campaign</>)}
-          </button>
-        </form>
-      </div>
+            <button
+              type="submit"
+              className="flex items-center gap-2 px-6 py-3 text-sm font-medium text-white bg-primary rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading || success}
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" /> Creating...
+                </>
+              ) : success ? (
+                <>
+                  <CheckCircle size={18} /> Created!
+                </>
+              ) : (
+                <>
+                  <Plus size={18} /> Create Campaign
+                </>
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
-  )
+  );
 }
 
 function DateField({ label, value, onChange, error, disabled }) {
@@ -310,12 +397,15 @@ function DateField({ label, value, onChange, error, disabled }) {
       <div className="relative">
         <input
           type="date"
-          className={`input-field w-full pr-10 ${error ? 'border-red-500 focus:ring-red-500' : ''}`}
+          className={`input-field w-full pr-10 ${error ? "border-red-500 focus:ring-red-500" : ""}`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
         />
-        <Calendar size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <Calendar
+          size={18}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+        />
       </div>
       {error && (
         <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
@@ -324,5 +414,5 @@ function DateField({ label, value, onChange, error, disabled }) {
         </div>
       )}
     </div>
-  )
+  );
 }

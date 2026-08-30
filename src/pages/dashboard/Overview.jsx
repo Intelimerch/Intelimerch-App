@@ -1,168 +1,295 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Wifi, UserPlus, MessageSquare, TrendingUp, TrendingDown, MoreHorizontal, Bell, Settings } from 'lucide-react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  Wifi, TrendingUp, Eye, MousePointerClick, Users,
+  Calendar, ArrowRight, Loader2, AlertCircle, Activity, MoreHorizontal
+} from 'lucide-react'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
+import { analyticsAPI } from '../../services/apiClient'
+import { useAuth } from '../../context/AuthContext'
 
-const scanData = [
-  { month: 'Jan', scans: 320 }, { month: 'Feb', scans: 380 }, { month: 'Mar', scans: 420 },
-  { month: 'Apr', scans: 390 }, { month: 'May', scans: 450 }, { month: 'Jun', scans: 480 },
-  { month: 'Jul', scans: 520 }, { month: 'Aug', scans: 790 }, { month: 'Sep', scans: 680 },
-  { month: 'Oct', scans: 720 }, { month: 'Nov', scans: 760 }, { month: 'Dec', scans: 840 },
-]
-
-const locationData = [
-  { name: 'Lagos', value: 4800, color: '#16a34a' },
-  { name: 'Calabar', value: 4340, color: '#dc2626' },
-  { name: 'Benin City', value: 980, color: '#f59e0b' },
-  { name: 'Abuja', value: 1820, color: '#a78bfa' },
-  { name: 'PH', value: 741, color: '#06b6d4' },
-]
-
-const campaigns = [
-  { name: "Summer Drop '25", tag: 'TG-001', product: '4 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Active' },
-  { name: 'VIP Member Unlock', tag: 'TG-002', product: '2 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Active' },
-  { name: 'VIP Member Unlock', tag: 'TG-002', product: '2 linked', date: '2025-06-01', scans: 4821, conv: '42%', status: 'Paused' },
-]
+const PIE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EF4444']
 
 export default function Overview() {
   const navigate = useNavigate()
-  const [period, setPeriod] = useState('12 months')
-  const periods = ['12 months', '3 months', '30 days', '7 days', '24 hours']
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [analytics, setAnalytics] = useState(null)
+  const [timeRange, setTimeRange] = useState('7 Days')
+
+  useEffect(() => {
+    async function fetchAnalytics() {
+      try {
+        setLoading(true)
+        setError(null)
+        const res = await analyticsAPI.getDashboardAnalytics()
+        console.log('📊 Dashboard analytics:', res)
+        const data = res?.analyticsData || res?.data || res || {}
+        setAnalytics(data)
+      } catch (err) {
+        console.error('Failed to load analytics:', err)
+        setError(err.message || 'Failed to load analytics')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchAnalytics()
+  }, [])
+
+  const totalScans = analytics?.totalNFCScans?.count ?? 0
+  const uniqueActivations = analytics?.uniqueActivations?.count ?? 0
+  const repeatScans = analytics?.repeatScans?.count ?? 0
+  const conversionRate = analytics?.conversionRate?.count ?? 0
+
+  // Real field, no fabricated fallback rows — if empty, the table just
+  // shows an empty state instead of pretend campaigns.
+  const campaignPerformance = Array.isArray(analytics?.campaignPerformance)
+    ? analytics.campaignPerformance
+    : []
+
+  const scanTimeline = analytics?.scanTimeline?.[0] || analytics?.scanTimeline || {}
+  const timelineData = scanTimeline[timeRange.replace(' ', '')] || []
+  // No fake data fallback — an empty chart honestly reflects that the
+  // backend hasn't recorded any scans in this range yet.
+  const chartData = timelineData
+
+  // Backend doesn't return topLocations at all yet — no fallback data,
+  // just an honest "not available" state instead of invented countries.
+  const topLocations = Array.isArray(analytics?.topLocations) ? analytics.topLocations : []
+  const totalLocationScans = topLocations.reduce((sum, l) => sum + (l.value || 0), 0)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <Loader2 size={40} className="text-primary animate-spin mb-4" />
+        <p className="text-gray-500">Loading dashboard...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <AlertCircle size={40} className="text-red-500 mb-4" />
+        <p className="text-red-500 text-center max-w-md">{error}</p>
+        <button onClick={() => window.location.reload()} className="btn-primary w-auto px-6 mt-3">
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
-          <p className="text-gray-500 text-sm">Good morning, Jenny 👋</p>
+          <p className="text-gray-500 text-sm">
+            {user?.firstName ? `Good morning, ${user.firstName} 🎉` : 'Welcome back 🎉'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard/notifications')} className="relative p-2 hover:bg-gray-100 rounded-xl">
-            <Bell size={20} className="text-gray-600" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full" />
+          <button className="p-2 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500">
+            <Calendar size={18} />
           </button>
-          <button className="p-2 hover:bg-gray-100 rounded-xl"><Settings size={20} className="text-gray-600" /></button>
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-300 to-pink-400" />
         </div>
       </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total NFC Scans" value="13,468" trend="+18% vs last month" up icon={<Wifi size={18} className="text-teal-500" />} bg="bg-teal-50" />
-        <StatCard label="Unique Activations" value="8,210" trend="+12% vs last month" up icon={<UserPlus size={18} className="text-violet-500" />} bg="bg-violet-50" />
-        <StatCard label="Repeat Scans" value="5,258" trend="+7% vs last month" up icon={<MessageSquare size={18} className="text-orange-400" />} bg="bg-orange-50" />
-        <StatCard label="Conversion Rate" value="24" trend="7% vs last month" up={false} icon={<TrendingDown size={18} className="text-blue-400" />} bg="bg-blue-50" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total NFC Scans"
+          value={totalScans.toLocaleString()}
+          percentage={analytics?.totalNFCScans?.percentage}
+          icon={<Wifi size={18} className="text-teal-500" />}
+          bg="bg-teal-50"
+        />
+        <StatCard
+          label="Unique Activations"
+          value={uniqueActivations.toLocaleString()}
+          percentage={analytics?.uniqueActivations?.percentage}
+          icon={<Users size={18} className="text-violet-500" />}
+          bg="bg-violet-50"
+        />
+        <StatCard
+          label="Repeat Scans"
+          value={repeatScans.toLocaleString()}
+          percentage={analytics?.repeatScans?.percentage}
+          icon={<MousePointerClick size={18} className="text-orange-400" />}
+          bg="bg-orange-50"
+        />
+        <StatCard
+          label="Conversion Rate"
+          value={`${conversionRate}%`}
+          percentage={analytics?.conversionRate?.percentage}
+          icon={<TrendingUp size={18} className="text-blue-400" />}
+          bg="bg-blue-50"
+        />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="col-span-1 lg:col-span-2 card">
-          <div className="flex items-center justify-between mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Scan Timeline */}
+        <div className="card col-span-1 lg:col-span-2 p-6">
+          <div className="flex items-center justify-between mb-6">
             <h3 className="font-semibold text-gray-800">Scan Timeline</h3>
-            <button className="text-xs text-gray-500 border border-gray-200 px-3 py-1 rounded-lg hover:bg-gray-50">View report</button>
+            <div className="flex items-center gap-2">
+              {['24 Hours', '7 Days', '30 Days'].map(range => (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                    timeRange === range ? 'bg-primary text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {range}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2 mb-4">
-            {periods.map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`text-xs px-2.5 py-1 rounded-full font-medium transition-all ${period === p ? 'bg-primary text-white' : 'text-gray-500 hover:text-gray-700'}`}>
-                {p}
-              </button>
-            ))}
-          </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={scanData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
-              <Line type="monotone" dataKey="scans" stroke="#F5A623" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: '#F5A623' }} />
-            </LineChart>
-          </ResponsiveContainer>
+
+          {chartData.length === 0 ? (
+            <div className="h-[220px] flex flex-col items-center justify-center text-gray-400">
+              <Activity size={28} className="mb-2 text-gray-300" />
+              <p className="text-sm">No scan data yet for this range</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} dy={10} />
+                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={40} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                  formatter={(value) => [`${value || 0} scans`, 'Scans']}
+                />
+                <Line type="monotone" dataKey="scans" stroke="#F97316" strokeWidth={2.5} dot={false} activeDot={{ r: 6, fill: '#F97316', stroke: '#fff', strokeWidth: 2 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
-        <div className="card">
+
+        {/* Top Locations */}
+        <div className="card p-6">
           <h3 className="font-semibold text-gray-800 mb-4">Top Locations</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={locationData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">
-                {locationData.map((e, i) => <Cell key={i} fill={e.color} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-1 mt-2">
-            {locationData.map(l => (
-              <div key={l.name} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
-                  <span className="text-gray-600">{l.name}</span>
+
+          {topLocations.length === 0 ? (
+            <div className="h-48 flex flex-col items-center justify-center text-gray-400">
+              <Activity size={28} className="mb-2 text-gray-300" />
+              <p className="text-sm text-center">No location data available yet</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center">
+              <div className="relative w-48 h-48 mb-6">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={topLocations} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={2} dataKey="value">
+                      {topLocations.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      formatter={(value) => [`${(value || 0).toLocaleString()} scans`, 'Scans']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-2xl font-bold text-gray-900">{(totalLocationScans / 1000).toFixed(1)}k</span>
+                  <span className="text-xs text-gray-400">Total Scans</span>
                 </div>
-                <span className="font-medium text-gray-800">{l.value.toLocaleString()}</span>
               </div>
-            ))}
-          </div>
+              <div className="w-full space-y-2.5">
+                {topLocations.slice(0, 5).map((loc, index) => (
+                  <div key={loc.name || index} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }} />
+                      <span className="text-xs text-gray-600">{loc.name || 'Unknown'}</span>
+                    </div>
+                    <span className="text-xs font-medium text-gray-800">{(loc.count || loc.value || 0).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Campaign Table */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-5">
+      {/* Campaign Performance Table */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between mb-6">
           <h3 className="font-semibold text-gray-800">Campaign Performance</h3>
-          <button className="text-primary text-sm font-semibold hover:underline">View All</button>
+          <button onClick={() => navigate('/dashboard/campaigns')} className="text-sm text-primary hover:underline font-medium flex items-center gap-1">
+            View All <ArrowRight size={14} />
+          </button>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-400 text-xs font-medium">
-              <th className="text-left pb-3">Campaign Name</th>
-              <th className="text-left pb-3">Tag Group</th>
-              <th className="text-left pb-3">Product</th>
-              <th className="text-left pb-3">Date Created</th>
-              <th className="text-left pb-3">Scans</th>
-              <th className="text-left pb-3">Conv.</th>
-              <th className="text-left pb-3">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {campaigns.map((c, i) => (
-              <tr key={i} className="hover:bg-gray-50/50">
-                <td className="py-3.5 font-medium text-gray-800">{c.name}</td>
-                <td className="py-3.5 text-gray-500">{c.tag}</td>
-                <td className="py-3.5 text-gray-500">{c.product}</td>
-                <td className="py-3.5 text-gray-500">{c.date}</td>
-                <td className="py-3.5 text-gray-700">{c.scans.toLocaleString()}</td>
-                <td className="py-3.5 text-gray-700">{c.conv}</td>
-                <td className="py-3.5">
-                  <StatusBadge status={c.status} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+        {campaignPerformance.length === 0 ? (
+          <div className="py-10 flex flex-col items-center justify-center text-gray-400">
+            <Activity size={28} className="mb-2 text-gray-300" />
+            <p className="text-sm">No campaigns yet</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Campaign Name</th>
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Products</th>
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Date Created</th>
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Scans</th>
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Conv.</th>
+                  <th className="text-left py-3 px-2 text-xs font-medium text-gray-400">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {campaignPerformance.slice(0, 5).map((camp, i) => (
+                  <tr key={camp._id || i} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="py-4 px-2 font-medium text-gray-800">{camp.campaignName || '—'}</td>
+                    <td className="py-4 px-2 text-gray-600">{camp.productsLinked ?? '—'}</td>
+                    <td className="py-4 px-2 text-gray-600">
+                      {camp.dateCreated ? new Date(camp.dateCreated).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="py-4 px-2 text-gray-800 font-medium">{(camp.scans || 0).toLocaleString()}</td>
+                    <td className="py-4 px-2 text-gray-600">{camp.conversion != null ? `${camp.conversion}%` : '—'}</td>
+                    <td className="py-4 px-2">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium capitalize ${
+                        camp.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
+                      }`}>
+                        {camp.status || 'inactive'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function StatCard({ label, value, trend, up, icon, bg }) {
+function StatCard({ label, value, percentage, icon, bg }) {
+  const hasTrend = typeof percentage === 'number'
+  const isUp = hasTrend && percentage >= 0
+
   return (
-    <div className="stat-card">
+    <div className="bg-white rounded-xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-gray-500">{label}</p>
         <div className={`w-8 h-8 ${bg} rounded-lg flex items-center justify-center`}>{icon}</div>
       </div>
       <p className="text-2xl font-bold text-gray-900 mb-1">{value}</p>
-      <p className={`text-xs font-medium flex items-center gap-1 ${up ? 'text-green-600' : 'text-red-500'}`}>
-        {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-        {trend}
-      </p>
+      {hasTrend ? (
+        <p className={`text-xs font-medium flex items-center gap-1 ${isUp ? 'text-green-600' : 'text-red-500'}`}>
+          {isUp ? '↗' : '↘'} {Math.abs(percentage)}% vs last month
+        </p>
+      ) : (
+        <p className="text-xs text-gray-300">No comparison data yet</p>
+      )}
     </div>
   )
-}
-
-function StatusBadge({ status }) {
-  const cls = status === 'Active' ? 'badge-active' : status === 'Paused' ? 'badge-paused' : 'badge-draft'
-  return <span className={cls}>{status}</span>
 }

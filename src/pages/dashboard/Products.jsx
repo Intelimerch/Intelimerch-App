@@ -1,10 +1,12 @@
+// src/pages/dashboard/Products.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, Loader2, AlertCircle, Package, X } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, Loader2, AlertCircle, Package, X, Link, ChevronLeft, ChevronRight } from 'lucide-react'  // ← Added ChevronLeft, ChevronRight
 import EmptyState from '../../components/EmptyState'
 import { productAPI } from '../../services/apiClient'
 
-// ─── Professional Error Parser ──────────────────────────
+const PAGE_SIZE = 20
+
 function parseErrorMessage(error) {
   const message = error?.message || '';
   
@@ -37,7 +39,7 @@ export default function Products() {
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
   const [openMenu, setOpenMenu] = useState(null)
-  const [categories, setCategories] = useState(['All'])
+  const [categories, setCategories] = useState(['All', 'T-Shirt', 'Cap', 'Hoodie', 'Bag'])
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
   const buttonRefs = useRef({})
   
@@ -45,30 +47,83 @@ export default function Products() {
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, productId: null, productName: '' })
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // ─── Default categories ───
-  const defaultCategories = ['All', 'T-Shirt', 'Cap', 'Hoodie']
+  // ─── Pagination State ───
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [hasNextPage, setHasNextPage] = useState(false)
+  const [hasPreviousPage, setHasPreviousPage] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
-  // ─── Fetch Products from API ───
-  const fetchProducts = async () => {
+  // ─── Default categories always shown ───
+  const defaultCategories = ['All', 'T-Shirt', 'Cap', 'Hoodie', 'Bag']
+
+  const isObjectId = (value) => {
+    if (!value || typeof value !== 'string') return false
+    return /^[0-9a-fA-F]{24}$/.test(value)
+  }
+
+  const getProductTypeName = (product) => {
+    if (product.productType && !isObjectId(product.productType)) {
+      return product.productType
+    }
+    
+    if (product.product?.productTypeId) {
+      const typeMap = {
+        '6a7094d9ccc599c16bea46d7': 'T-Shirt',
+        '6a747ba83427b9d628f80375': 'Hoodie',
+        '6a747c7b3427b9d628f8037b': 'Hoodie',
+        '6a747d0f3427b9d628f80387': 'Bag',
+        '6a74a16b3427b9d628f80392': 'T-Shirt',
+        '6a7f3c6216995eaa4c0e71b2': 'Hoodie',
+        '6a82eb283daf2628ab4807fa': 'T-Shirt',
+      }
+      return typeMap[product.product.productTypeId] || null
+    }
+    
+    return null
+  }
+
+  const getCampaignName = (product) => {
+    if (product.campaign?.campaignName) return product.campaign.campaignName
+    if (product.campaign?.name) return product.campaign.name
+    if (product.campaignName) return product.campaignName
+    if (product.campaignId) return 'Campaign ID: ' + product.campaignId
+    return '-'
+  }
+
+  // ─── Fetch Products from API with Pagination ───
+  const fetchProducts = async (page = 1) => {
     try {
       setLoading(true)
       setError(null)
       setUiError(null)
-      const response = await productAPI.getAll()
-      console.log('📦 Products fetched:', JSON.stringify(response, null, 2))
+      
+      // ✅ Fetch only the current page from backend
+      const response = await productAPI.getAll(page, PAGE_SIZE)
+      console.log('📦 Products fetched:', response)
       
       let productList = []
-      if (Array.isArray(response.data)) {
+      if (response.data && Array.isArray(response.data)) {
         productList = response.data
       } else if (Array.isArray(response)) {
         productList = response
-      } else if (response.data?.products) {
+      } else if (response?.data?.products) {
         productList = response.data.products
       } else {
         productList = response || []
       }
       
       setProducts(productList)
+      
+      // ✅ Update pagination state from backend response
+      const pagination = response.pagination || {}
+      setCurrentPage(pagination.page || 1)
+      setTotalPages(pagination.totalPages || 1)
+      setTotalItems(pagination.total || productList.length)
+      setHasNextPage(pagination.hasNextPage || false)
+      setHasPreviousPage(pagination.hasPreviousPage || false)
+      setPageSize(pagination.limit || PAGE_SIZE)
     } catch (err) {
       console.error('Error fetching products:', err)
       const friendlyMessage = parseErrorMessage(err)
@@ -80,10 +135,9 @@ export default function Products() {
   }
 
   useEffect(() => {
-    fetchProducts()
+    fetchProducts(1)
   }, [])
 
-  // ─── Close dropdown when clicking outside ───
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (openMenu && !e.target.closest('.dropdown-menu') && !e.target.closest('.dropdown-trigger')) {
@@ -94,21 +148,38 @@ export default function Products() {
     return () => document.removeEventListener('click', handleClickOutside)
   }, [openMenu])
 
-  // ─── Extract unique categories from products ───
+  // ─── Extract categories from products BUT always keep defaults ───
   useEffect(() => {
     if (products.length > 0) {
-      const uniqueTypes = [...new Set(products.map(p => p.productType).filter(Boolean))]
-      if (uniqueTypes.length > 0) {
-        setCategories(['All', ...uniqueTypes])
-      } else {
-        setCategories(defaultCategories)
-      }
+      const uniqueTypes = [...new Set(products.map(p => {
+        const typeName = getProductTypeName(p)
+        if (typeName && typeName !== '-' && !isObjectId(typeName)) {
+          return typeName
+        }
+        return null
+      }).filter(Boolean))]
+      
+      const allCategories = ['All', ...new Set([...defaultCategories.slice(1), ...uniqueTypes])]
+      setCategories(allCategories)
     } else {
       setCategories(defaultCategories)
     }
   }, [products])
 
-  // ─── Delete Product ───
+  // ─── Reset to Page 1 on Filter Change ───
+  useEffect(() => {
+    fetchProducts(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
+
+  // ─── Handle Page Change ───
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return
+    setCurrentPage(newPage)
+    fetchProducts(newPage)
+    setOpenMenu(null)
+  }
+
   const confirmDelete = (id, name) => {
     setUiError(null)
     setDeleteModal({ isOpen: true, productId: id, productName: name || 'this product' })
@@ -123,7 +194,8 @@ export default function Products() {
     setUiError(null)
     try {
       await productAPI.delete(productId)
-      await fetchProducts()
+      // Refresh current page after delete
+      await fetchProducts(currentPage)
       setDeleteModal({ isOpen: false, productId: null, productName: '' })
     } catch (err) {
       console.error('Error deleting product:', err)
@@ -138,17 +210,22 @@ export default function Products() {
     setDeleteModal({ isOpen: false, productId: null, productName: '' })
   }
 
-  // ─── Filter & Search ───
   const filteredProducts = products.filter(p => {
-    const matchesFilter = filter === 'All' || p.productType === filter || p.productCategory === filter
+    const productName = p.product?.productName || p.productName || p.name || ''
+    const productType = getProductTypeName(p) || ''
+    const description = p.product?.description || p.description || ''
+    const sku = p.sku || p.product?.productCode || p.productCode || ''
+    const campaignName = getCampaignName(p)
+    
+    const matchesFilter = filter === 'All' || productType === filter
     const matchesSearch = 
-      (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.description || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.sku || p.productCode || '').toLowerCase().includes(search.toLowerCase())
+      productName.toLowerCase().includes(search.toLowerCase()) ||
+      description.toLowerCase().includes(search.toLowerCase()) ||
+      sku.toLowerCase().includes(search.toLowerCase()) ||
+      campaignName.toLowerCase().includes(search.toLowerCase())
     return matchesFilter && matchesSearch
   })
 
-  // ─── Open dropdown with position calculation ───
   const openDropdown = (id, e) => {
     const target = e?.currentTarget || buttonRefs.current[id]
     
@@ -162,8 +239,8 @@ export default function Products() {
     }
 
     const rect = target.getBoundingClientRect()
-    const dropdownWidth = 130
-    const dropdownHeight = 100
+    const dropdownWidth = 160
+    const dropdownHeight = 120
     
     let left = rect.right - dropdownWidth
     let top = rect.bottom + 4
@@ -185,7 +262,6 @@ export default function Products() {
     setOpenMenu(openMenu === id ? null : id)
   }
 
-  // ─── Loading State ───
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -195,13 +271,12 @@ export default function Products() {
     )
   }
 
-  // ─── Error State ───
   if (error && !uiError) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
         <AlertCircle size={40} className="text-red-500 mb-4" />
         <p className="text-red-500 mb-4 text-center max-w-md">{error}</p>
-        <button onClick={fetchProducts} className="btn-primary">
+        <button onClick={() => fetchProducts(currentPage)} className="btn-primary">
           Retry
         </button>
       </div>
@@ -220,7 +295,6 @@ export default function Products() {
         </button>
       </div>
 
-      {/* ─── Professional UI Error Display ─── */}
       {uiError && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3">
           <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
@@ -236,7 +310,7 @@ export default function Products() {
         </div>
       )}
 
-      {/* ─── Filter Buttons ─── */}
+      {/* ─── Filter Buttons — Always Shows: All, T-Shirt, Cap, Hoodie, Bag ─── */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {categories.map((cat) => (
           <button
@@ -256,7 +330,11 @@ export default function Products() {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input 
             value={search} 
-            onChange={e => setSearch(e.target.value)} 
+            onChange={e => {
+              setSearch(e.target.value)
+              // Reset to page 1 on search
+              if (currentPage !== 1) fetchProducts(1)
+            }} 
             placeholder="Search products..." 
             className="input-field pl-9 w-56" 
           />
@@ -272,90 +350,109 @@ export default function Products() {
           actionLabel="Add Product" 
         />
       ) : (
-        <div className="card p-0 overflow-x-auto overflow-y-visible">
-          <table className="w-full text-sm min-w-[900px]">
-            <thead className="bg-gray-50/50">
-              <tr className="text-gray-400 text-xs font-medium">
-                {['Product','Type','Color','Size','SKU','Campaign','Product ID','Scans','Tag ID',''].map(h => (
-                  <th key={h} className="text-left px-4 py-3.5 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filteredProducts.map((p, i) => {
-                const id = p.id || p.productId || p._id || i
-                
-                // ─── Get campaign name ───
-                const campaignName = p.campaign?.campaignName || p.campaign?.name || p.campaignName || p.campaignId || '-'
-                
-                // ─── Get product type ───
-                const productType = p.productType || p.type || p.productCategory || '-'
-                
-                // ─── Get SKU ───
-                const sku = p.sku || p.productCode || p.code || '-'
-                
-                // ─── Get color ───
-                const color = p.color || '-'
-                
-                // ─── Get size ───
-                const size = p.size || '-'
-                
-                // ─── Get product ID ───
-                const productIdDisplay = p.productId || p.id || p._id || '-'
-                
-                // ─── Get scans ───
-                const scans = p.scans || p.taps || 0
-                
-                // ─── Get tag ID ───
-                const tagId = p.tagId || p.tag || '-'
+        <>
+          <div className="card p-0 overflow-x-auto overflow-y-visible">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead className="bg-gray-50/50">
+                <tr className="text-gray-400 text-xs font-medium">
+                  {['Product','Type','Color','Size','SKU','Campaign','Product ID','Scans','Tag ID',''].map(h => (
+                    <th key={h} className="text-left px-4 py-3.5 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filteredProducts.map((p, i) => {
+                  const productObj = p.product || p
+                  const productId = p.productId || p._id || i
+                  const variantId = p._id || i
+                  
+                  const productName = productObj.productName || p.productName || 'Unnamed Product'
+                  const productType = getProductTypeName(p) || '-'
+                  const color = p.colorId || p.color || '-'
+                  const size = p.sizeId || p.size || '-'
+                  const sku = p.sku || productObj.productCode || '-'
+                  const campaignName = getCampaignName(p)
+                  const scans = p.scans || p.taps || 0
+                  const tagId = p.tagId || p.tag || '-'
+                  
+                  const actionId = p._id || p.id || productId
 
-                return (
-                  <tr key={id} className="hover:bg-gray-50/40">
-                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">
-                      {p.productName || p.name || 'Unnamed Product'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {productType}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {color}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {size}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {sku}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                      {campaignName}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {productIdDisplay}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {typeof scans === 'number' ? scans.toLocaleString() : '0'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {tagId}
-                    </td>
-                    <td className="px-4 py-3 text-right relative">
-                      <button 
-                        ref={(el) => { buttonRefs.current[id] = el }}
-                        onClick={(e) => openDropdown(id, e)}
-                        className="dropdown-trigger p-1 hover:bg-gray-100 rounded-lg inline-flex items-center justify-center"
-                      >
-                        <MoreHorizontal size={16} className="text-gray-400" />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                  return (
+                    <tr key={actionId} className="hover:bg-gray-50/40">
+                      <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">
+                        {productName}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {productType}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {color}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {size}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {sku}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {campaignName}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {productId}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {typeof scans === 'number' ? scans.toLocaleString() : '0'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {tagId}
+                      </td>
+                      <td className="px-4 py-3 text-right relative">
+                        <button 
+                          ref={(el) => { buttonRefs.current[actionId] = el }}
+                          onClick={(e) => openDropdown(actionId, e)}
+                          className="dropdown-trigger p-1 hover:bg-gray-100 rounded-lg inline-flex items-center justify-center"
+                        >
+                          <MoreHorizontal size={16} className="text-gray-400" />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ─── Pagination Controls (ALWAYS Visible) ─── */}
+<div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-100">
+  <p className="text-xs text-gray-500">
+    Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
+    <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> of{' '}
+    <span className="font-medium">{totalItems}</span> fans
+  </p>
+  <div className="flex items-center gap-2">
+    <button
+      onClick={() => handlePageChange(currentPage - 1)}
+      disabled={!hasPreviousPage}
+      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+    >
+      Previous
+    </button>
+    <span className="text-sm font-medium text-gray-700 px-2">
+      Page {currentPage} of {totalPages}
+    </span>
+    <button
+      onClick={() => handlePageChange(currentPage + 1)}
+      disabled={!hasNextPage}
+      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+    >
+      Next
+    </button>
+  </div>
+</div>
+        </>
       )}
 
-      {/* ─── FIXED POSITION DROPDOWN MENU ─── */}
+      {/* ─── Dropdown Menu with 3 options ─── */}
       {openMenu !== null && (
         <>
           <div 
@@ -363,27 +460,52 @@ export default function Products() {
             onClick={() => setOpenMenu(null)} 
           />
           <div
-            className="dropdown-menu fixed bg-white border border-gray-200 rounded-xl shadow-lg z-[999] py-1 min-w-[130px]"
+            className="dropdown-menu fixed bg-white border border-gray-200 rounded-xl shadow-lg z-[999] py-1 min-w-[160px]"
             style={{
               top: menuPosition.top,
               left: menuPosition.left,
             }}
           >
+            {/* Edit - Only product details */}
             <button 
               onClick={() => {
-                const product = products.find(p => (p.id || p.productId || p._id) === openMenu)
+                const product = products.find(p => p._id === openMenu)
                 setOpenMenu(null)
-                if (product) navigate(`/dashboard/products/edit/${product.id || product.productId || product._id}`)
+                if (product) {
+                  const productId = product.productId || product._id
+                  navigate(`/dashboard/products/edit/${productId}`)
+                }
               }}
               className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-primary hover:bg-gray-50 font-medium"
             >
               <Pencil size={13} /> Edit
             </button>
+            
+            {/* Assign to Campaign - Separate page */}
             <button 
               onClick={() => {
-                const product = products.find(p => (p.id || p.productId || p._id) === openMenu)
+                const product = products.find(p => p._id === openMenu)
                 setOpenMenu(null)
-                if (product) confirmDelete(product.id || product.productId || product._id, product.productName || product.name)
+                if (product) {
+                  const productId = product.productId || product._id
+                  navigate(`/dashboard/products/assign/${productId}`)
+                }
+              }}
+              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-primary hover:bg-gray-50 font-medium"
+            >
+              <Link size={13} /> Assign to Campaign
+            </button>
+            
+            {/* Delete */}
+            <button 
+              onClick={() => {
+                const product = products.find(p => p._id === openMenu)
+                setOpenMenu(null)
+                if (product) {
+                  const productId = product.productId || product._id
+                  const name = product.product?.productName || product.productName || 'this product'
+                  confirmDelete(productId, name)
+                }
               }}
               className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 font-medium"
             >
@@ -393,7 +515,6 @@ export default function Products() {
         </>
       )}
 
-      {/* ─── Delete Confirmation Modal ─── */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-black/50 z-[999] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">

@@ -1,6 +1,10 @@
+// src/components/AdminLayout.jsx
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Users, Megaphone, Tag, BarChart2, Settings, LogOut, Menu, X, ChevronLeft } from 'lucide-react'
+import { 
+  LayoutDashboard, Users, Megaphone, Tag, BarChart2, Settings, LogOut, 
+  Menu, X, ChevronLeft, Gift 
+} from 'lucide-react'
 import ScreenGuard from './ScreenGuard'
 
 const navItems = [
@@ -8,6 +12,7 @@ const navItems = [
   { to: '/admin/creators', label: 'Creators', icon: Users },
   { to: '/admin/campaigns', label: 'Campaigns', icon: Megaphone },
   { to: '/admin/tags', label: 'Tags', icon: Tag },
+  { to: '/admin/perks', label: 'Perks Library', icon: Gift }, // ✅ ADDED
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart2 },
 ]
 

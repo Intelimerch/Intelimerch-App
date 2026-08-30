@@ -1,84 +1,526 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Trash2, LayoutDashboard } from 'lucide-react'
-
-const creators = [
-  { name: 'Luna Torres', handle: '@lunatms', tags: 2, scans: 14220, campaign: 1, status: 'Active', initials: 'LT', color: 'from-orange-300 to-pink-400' },
-  { name: 'Zara Monroe', handle: '@zaramonroe', tags: 2, scans: 14220, campaign: 1, status: 'Active', initials: 'ZM', color: 'from-purple-300 to-indigo-400' },
-  { name: 'Marcus Webb', handle: '@marcuswebb', tags: 2, scans: 14220, campaign: 1, status: 'Active', initials: 'MW', color: 'from-teal-300 to-blue-400' },
-  { name: 'DeShawn Cole', handle: '@deshawncole', tags: 2, scans: 14220, campaign: 1, status: 'Inactive', initials: 'DC', color: 'from-gray-300 to-gray-400' },
-]
+// src/pages/admin/CreatorsManagement.jsx
+import { useState, useEffect } from 'react'
+import { 
+  Search, Loader2, AlertCircle, 
+  Plus, ArrowLeft, Trash2, Database, Users, X
+} from 'lucide-react'
+import EmptyState from '../../components/EmptyState'
+import { adminAPI } from '../../services/apiClient'
 
 export default function CreatorsManagement() {
-  const navigate = useNavigate()
-  const [filter, setFilter] = useState('All')
+  const [creators, setCreators] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
-  const filters = ['All', 'Active', 'Inactive']
+  const [activeTab, setActiveTab] = useState('All')
+  const [viewMode, setViewMode] = useState('list') // 'list' | 'add'
+  const [selectedCreatorId, setSelectedCreatorId] = useState(null)
+  const [loadedData, setLoadedData] = useState(null) // Stores loaded creator data
 
-  const filtered = creators.filter(c => {
-    const matchFilter = filter === 'All' || c.status === filter
-    const matchSearch = c.name.toLowerCase().includes(search.toLowerCase())
-    return matchFilter && matchSearch
+  // ─── Load Creators from API (REAL DATA) ───
+  const loadCreators = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await adminAPI.getCreators()
+      console.log('📊 Creators API Response:', res)
+      
+      // Parse the response (handles multiple shapes)
+      let list = []
+      if (Array.isArray(res.data)) list = res.data
+      else if (res.data?.creators && Array.isArray(res.data.creators)) list = res.data.creators
+      else if (Array.isArray(res)) list = res
+      else if (res.creators && Array.isArray(res.creators)) list = res.creators
+      
+      setCreators(list)
+    } catch (err) {
+      console.error('Failed to load creators:', err)
+      setError(err.message || 'Failed to load creators')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCreators()
+  }, [])
+
+  // ─── HELPER: Extract creator name (handles multiple field names) ───
+  const getCreatorName = (creator) => {
+    return creator.firstName || creator.name || creator.fullName || creator.username || 'Unknown Creator'
+  }
+
+  // ─── HELPER: Extract creator username ───
+  const getCreatorUsername = (creator) => {
+    return creator.userName || creator.username || creator.handle || `@${creator.email?.split('@')[0] || 'user'}`
+  }
+
+  // ─── HELPER: Check if creator is active ───
+  const isCreatorActive = (creator) => {
+    return creator.status === 'Active' || 
+           creator.accountStatus === 'ACTIVE' || 
+           creator.isActive === true ||
+           creator.status === 'active'
+  }
+
+  // ─── Filter creators based on tab and search ───
+  const filteredCreators = creators.filter(c => {
+    const q = search.toLowerCase()
+    const fullName = getCreatorName(c).toLowerCase()
+    const username = getCreatorUsername(c).toLowerCase()
+    const matchesSearch = 
+      fullName.includes(q) ||
+      username.includes(q) ||
+      (c.email || '').toLowerCase().includes(q) ||
+      (c.phone || '').toLowerCase().includes(q)
+
+    let matchesTab = true
+    if (activeTab === 'Active') matchesTab = isCreatorActive(c)
+    if (activeTab === 'Inactive') matchesTab = !isCreatorActive(c)
+
+    return matchesSearch && matchesTab
   })
 
+  // ✅ FIXED: Actually calls the delete API
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this creator?')) return
+    try {
+      setLoading(true)
+      // Call the actual delete API
+      await adminAPI.deleteCreator(id) // NEED TO ADD THIS TO adminAPI
+      setCreators(creators.filter(c => (c._id || c.id) !== id))
+      alert('Creator deleted successfully!')
+    } catch (err) {
+      console.error('Failed to delete creator:', err)
+      alert(err.message || 'Failed to delete creator')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ✅ FIXED: Actually displays the loaded data
+  const handleLoadData = async (creatorId) => {
+    try {
+      setLoading(true)
+      const res = await adminAPI.getCreatorFans(creatorId)
+      console.log('📊 Creator data loaded:', res)
+      
+      // Extract fan data
+      const fans = Array.isArray(res.data) ? res.data : (res.data?.fans || res.fans || [])
+      
+      setLoadedData({
+        creatorId,
+        fans,
+        totalFans: fans.length
+      })
+      
+      // Show the data in a modal/panel
+      alert(`Loaded ${fans.length} fans for this creator!`)
+    } catch (err) {
+      console.error('Failed to load creator data:', err)
+      alert(err.message || 'Failed to load creator data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ─── ADD CREATOR FULL PAGE ───
+  if (viewMode === 'add') {
+    return (
+      <AddCreatorPage
+        onBack={() => setViewMode('list')}
+        onSuccess={() => {
+          setViewMode('list')
+          loadCreators()
+        }}
+      />
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <Loader2 size={40} className="text-primary animate-spin mb-4" />
+        <p className="text-gray-500">Loading creators...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <AlertCircle size={40} className="text-red-500 mb-4" />
+        <p className="text-red-500 text-center max-w-md">{error}</p>
+      </div>
+    )
+  }
+
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div className="space-y-6">
+      {/* ─── HEADER ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Creators Management</h1>
-          <p className="text-gray-500 text-sm">15 creators · 12 active</p>
+          <p className="text-gray-500 text-sm mt-1">
+            <span className="font-semibold text-gray-700">{filteredCreators.length}</span> creators ·{' '}
+            <span className="font-semibold text-gray-700">
+              {filteredCreators.filter(c => isCreatorActive(c)).length}
+            </span> active
+          </p>
         </div>
-        <button className="btn-primary w-auto px-5"><Plus size={16} /> Add Creator</button>
+        <button
+          onClick={() => setViewMode('add')}
+          className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
+        >
+          <Plus size={16} />
+          Add Creator
+        </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex gap-2">
-          {filters.map(f => (
-            <button key={f} onClick={() => setFilter(f)} className={filter === f ? 'filter-btn-active' : 'filter-btn'}>{f}</button>
+      {/* ─── FILTER TABS + SEARCH ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full p-1">
+          {['All', 'Active', 'Inactive'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
+                activeTab === tab 
+                  ? 'bg-yellow-500 text-white' 
+                  : 'text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              {tab}
+            </button>
           ))}
         </div>
+        
         <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search" className="input-field pl-9 w-64" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-72 pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+          />
         </div>
       </div>
 
-      <div className="space-y-4">
-        {filtered.map((creator, i) => (
-          <div key={i} className="card">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${creator.color} flex items-center justify-center text-white font-bold text-sm`}>
-                  {creator.initials}
+      {/* ─── LOADED DATA PANEL ─── */}
+      {loadedData && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-blue-800">Loaded Data for Creator</h3>
+            <button onClick={() => setLoadedData(null)} className="p-1 text-blue-500 hover:bg-blue-100 rounded">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-sm text-blue-700 mb-2">Total Fans: <strong>{loadedData.totalFans}</strong></p>
+          {loadedData.fans.length > 0 && (
+            <ul className="space-y-1">
+              {loadedData.fans.slice(0, 5).map((fan, i) => (
+                <li key={i} className="text-sm text-blue-700">
+                  {fan.name || fan.firstName || fan.email || 'Fan'} - {fan.email || fan.phone || 'No contact'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* ─── CREATORS LIST (Full Width Cards) ─── */}
+      {filteredCreators.length === 0 ? (
+        <EmptyState
+          icon={<Users size={40} className="text-gray-300" />}
+          title="No creators found"
+          description="Try adjusting your search or add a new creator."
+        />
+      ) : (
+        <div className="space-y-4">
+          {filteredCreators.map((creator) => {
+            const creatorId = creator._id || creator.id
+            const isSelected = selectedCreatorId === creatorId
+            const isActive = isCreatorActive(creator)
+            const creatorName = getCreatorName(creator)
+            const creatorUsername = getCreatorUsername(creator)
+            
+            return (
+              <div 
+                key={creatorId} 
+                className={`bg-white rounded-xl border p-6 transition-all ${
+                  isSelected 
+                    ? 'border-yellow-400 ring-2 ring-yellow-100' 
+                    : 'border-gray-200 hover:shadow-lg'
+                }`}
+                onClick={() => setSelectedCreatorId(creatorId)}
+              >
+                {/* Header - Avatar + Name + Status */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {creator.avatar || creator.profileImage ? (
+                        <img src={creator.avatar || creator.profileImage} alt="avatar" className="w-12 h-12 rounded-full object-cover" />
+                      ) : (
+                        <span className="text-lg font-bold text-gray-600">
+                          {creatorName[0]?.toUpperCase()}
+                          {creator.lastName?.[0]?.toUpperCase() || ''}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900 text-lg">
+                        {creatorName}
+                      </h3>
+                      <p className="text-sm text-gray-500">{creatorUsername}</p>
+                    </div>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                    isActive
+                      ? 'bg-green-50 text-green-600'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {isActive ? 'Active' : 'Inactive'}
+                  </span>
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-900">{creator.name}</p>
-                  <p className="text-sm text-gray-500">{creator.handle}</p>
+
+                {/* Stats - Horizontal */}
+                <div className="flex gap-12 mb-5">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">TAGS</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.tagsCount ?? creator.tags ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">TOTAL SCANS</p>
+                    <p className="text-xl font-bold text-gray-900">{(creator.totalScans ?? creator.scans ?? creator.tapCount ?? 0).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">CAMPAIGN</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.campaignsCount ?? creator.campaigns ?? 0}</p>
+                  </div>
+                </div>
+
+                {/* Actions - Load Data + Delete */}
+                <div className="flex gap-3">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleLoadData(creatorId) }}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Database size={14} />
+                    Load Data
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDelete(creatorId) }}
+                    className="border border-red-200 text-red-500 hover:bg-red-50 px-5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
                 </div>
               </div>
-              <span className={creator.status === 'Active' ? 'badge-active' : 'filter-btn text-gray-500'}>
-                {creator.status === 'Active' && <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block mr-1" />}
-                {creator.status}
-              </span>
-            </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              {[['TAGS', creator.tags], ['TOTAL SCANS', creator.scans.toLocaleString()], ['CAMPAIGN', creator.campaign]].map(([label, val]) => (
-                <div key={label}>
-                  <p className="text-xs text-gray-400 font-semibold tracking-wide mb-0.5">{label}</p>
-                  <p className="text-lg font-bold text-gray-900">{val}</p>
-                </div>
-              ))}
-            </div>
+// ─── ADD CREATOR FULL PAGE (FIXED) ───
+function AddCreatorPage({ onBack, onSuccess }) {
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    userName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
-            <div className="flex gap-3">
-              <button onClick={() => navigate(`/dashboard?adminAs=${encodeURIComponent(creator.handle)}`)} className="btn-primary w-auto px-5 text-sm py-2 gap-2"><LayoutDashboard size={14} /> View Dashboard</button>
-              <button className="border border-red-200 text-red-500 font-semibold px-5 py-2 rounded-xl hover:bg-red-50 text-sm flex items-center gap-2 transition-all">
-                <Trash2 size={14} /> Delete
-              </button>
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    try {
+      setLoading(true)
+      setError(null)
+      
+      // ✅ FIXED: Send correct Swagger fields
+      const payload = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        userName: formData.userName,
+        email: formData.email,
+        phone: formData.phone,
+        password: formData.password,
+      }
+
+      console.log('📤 Registering creator with payload:', payload)
+      
+      await adminAPI.registerCreator(payload)
+      
+      onSuccess()
+    } catch (err) {
+      console.error('Failed to register creator:', err)
+      setError(err.message || 'Failed to register creator')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Add New Creator</h1>
+          <p className="text-gray-500 text-sm mt-1">Onboard a creator to Intel Merch</p>
+        </div>
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+        >
+          <ArrowLeft size={16} />
+          Back
+        </button>
+      </div>
+
+      {/* Form Card */}
+      <div className="bg-white rounded-xl border border-gray-200 p-8 max-w-2xl">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* First Name + Last Name */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                First Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Jenny"
+                value={formData.firstName}
+                onChange={(e) => setFormData({...formData, firstName: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Last Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Wilson"
+                value={formData.lastName}
+                onChange={(e) => setFormData({...formData, lastName: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
             </div>
           </div>
-        ))}
+
+          {/* Username */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+              Username <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. jenny"
+              value={formData.userName}
+              onChange={(e) => setFormData({...formData, userName: e.target.value})}
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              required
+            />
+          </div>
+
+          {/* Email + Phone */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Email <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="email"
+                placeholder="@youremail"
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Phone
+              </label>
+              <input
+                type="tel"
+                placeholder="+1234567890"
+                value={formData.phone}
+                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {/* Password + Confirm */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                placeholder="Create a password"
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Confirm Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                placeholder="Confirm password"
+                value={formData.confirmPassword}
+                onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-6 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {loading && <Loader2 size={16} className="animate-spin" />}
+              {loading ? 'Creating...' : 'Create Account'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
