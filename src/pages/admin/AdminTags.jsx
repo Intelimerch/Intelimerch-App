@@ -3,10 +3,14 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { 
   Search, Loader2, AlertCircle, MoreHorizontal, 
-  Plus, ArrowLeft, ExternalLink, Tag, Trash2, Edit2, Eye
+  Plus, ArrowLeft, ExternalLink, Tag, Trash2, Edit2, Eye,
+  CheckCircle, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { tagsAPI, campaignAPI } from '../../services/apiClient'
+import { useFormPersistence } from '../../hooks/useFormPersistence'
+
+const PAGE_SIZE = 20
 
 export default function AdminTags() {
   const navigate = useNavigate()
@@ -16,27 +20,41 @@ export default function AdminTags() {
   const [search, setSearch] = useState('')
   const [activeFilter, setActiveFilter] = useState('All')
   const [openMenu, setOpenMenu] = useState(null)
-  const [viewMode, setViewMode] = useState('list') // 'list' | 'generate'
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 }) 
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = sessionStorage.getItem('admin_tags_view_mode')
+    return saved || 'list' // 'list' | 'generate'
+  })
 
-  // ─── Load Tags from API (REAL DATA) ───
-  const loadTags = async () => {
+  // ✅ Persist viewMode to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('admin_tags_view_mode', viewMode)
+  }, [viewMode])
+
+  // ─── Pagination State ───
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [hasNextPage, setHasNextPage] = useState(false)
+  const [hasPreviousPage, setHasPreviousPage] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
+
+  // ─── Load Tags from API with Pagination ───
+  const loadTags = async (page = 1) => {
     try {
       setLoading(true)
       setError(null)
       
-      // Try to get all tags (this should work for admins too)
       let res
       try {
-        res = await tagsAPI.getAll()
+        res = await tagsAPI.getAll(page, PAGE_SIZE)
       } catch (err) {
-        // Fallback to artist tags if admin endpoint fails
         console.log('Trying artist tags endpoint...')
-        res = await tagsAPI.getArtistTags()
+        res = await tagsAPI.getArtistTags(page, PAGE_SIZE)
       }
       
       console.log('📊 Tags fetched:', res)
       
-      // Parse the response (handles multiple shapes)
       let list = []
       if (Array.isArray(res.data)) list = res.data
       else if (res.data?.tags && Array.isArray(res.data.tags)) list = res.data.tags
@@ -45,6 +63,25 @@ export default function AdminTags() {
       else if (res.data?.data && Array.isArray(res.data.data)) list = res.data.data
       
       setTags(list)
+      
+      const pagination = res.pagination
+      if (pagination && pagination.totalPages) {
+        setCurrentPage(pagination.page || 1)
+        setTotalPages(pagination.totalPages || 1)
+        setTotalItems(pagination.total || list.length)
+        setHasNextPage(pagination.hasNextPage || false)
+        setHasPreviousPage(pagination.hasPreviousPage || false)
+        setPageSize(pagination.limit || PAGE_SIZE)
+      } else {
+        const total = list.length
+        const calculatedTotalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+        setCurrentPage(page)
+        setTotalPages(calculatedTotalPages)
+        setTotalItems(total)
+        setHasNextPage(page < calculatedTotalPages)
+        setHasPreviousPage(page > 1)
+        setPageSize(PAGE_SIZE)
+      }
     } catch (err) {
       console.error('Failed to load tags:', err)
       setError(err.message || 'Failed to load tags')
@@ -55,10 +92,21 @@ export default function AdminTags() {
   }
 
   useEffect(() => {
-    loadTags()
+    loadTags(1)
   }, [])
 
-  // ─── HELPERS: Extract tag data ───
+  useEffect(() => {
+    loadTags(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter])
+
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return
+    setCurrentPage(newPage)
+    loadTags(newPage)
+    setOpenMenu(null)
+  }
+
   const getTagId = (tag) => {
     return tag.tagId || tag._id?.slice(-8) || tag.id || '—'
   }
@@ -103,7 +151,6 @@ export default function AdminTags() {
     return tag.scans || tag.tapCount || tag.totalScans || 0
   }
 
-  // ─── Filter tags based on type filter and search ───
   const filteredTags = tags.filter(tag => {
     const q = search.toLowerCase()
     const tagId = getTagId(tag).toLowerCase()
@@ -111,11 +158,7 @@ export default function AdminTags() {
     const sku = getSku(tag).toLowerCase()
     const type = getType(tag).toLowerCase()
     
-    const matchesSearch = 
-      tagId.includes(q) || 
-      nfcLink.includes(q) || 
-      sku.includes(q) ||
-      type.includes(q)
+    const matchesSearch = tagId.includes(q) || nfcLink.includes(q) || sku.includes(q) || type.includes(q)
 
     let matchesFilter = true
     if (activeFilter !== 'All') {
@@ -129,10 +172,27 @@ export default function AdminTags() {
     if (!window.confirm('Are you sure you want to delete this tag?')) return
     try {
       await tagsAPI.remove(id)
-      setTags(tags.filter(t => (t._id || t.id) !== id))
+      loadTags(currentPage)
     } catch (err) {
       alert(err.message || 'Failed to delete tag')
     }
+  }
+
+  const openDropdown = (id, e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const dropdownWidth = 160
+    const dropdownHeight = 120
+    
+    let left = rect.right - dropdownWidth
+    let top = rect.bottom + 4
+
+    if (left < 10) left = 10
+    if (left + dropdownWidth > window.innerWidth - 10) left = window.innerWidth - dropdownWidth - 10
+    if (top + dropdownHeight > window.innerHeight - 10) top = rect.top - dropdownHeight - 4
+    if (top < 10) top = 10
+
+    setMenuPosition({ top, left })
+    setOpenMenu(openMenu === id ? null : id)
   }
 
   // ─── GENERATE TAG PAGE ───
@@ -142,7 +202,7 @@ export default function AdminTags() {
         onBack={() => setViewMode('list')}
         onSuccess={() => {
           setViewMode('list')
-          loadTags()
+          loadTags(1)
         }}
       />
     )
@@ -207,7 +267,10 @@ export default function AdminTags() {
             type="text"
             placeholder="Search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              if (currentPage !== 1) loadTags(1)
+            }}
             className="w-72 pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
           />
         </div>
@@ -221,7 +284,7 @@ export default function AdminTags() {
           description="Try adjusting your search or generate a new tag."
         />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden relative">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[1200px]">
               <thead>
@@ -267,30 +330,12 @@ export default function AdminTags() {
                       <td className="py-4 px-4 text-gray-700 font-medium">{getScans(tag).toLocaleString()}</td>
                       <td className="py-4 px-4 text-gray-600 font-mono text-xs">{getTagId(tag)}</td>
                       <td className="py-4 px-4 text-right">
-                        <div className="relative inline-block">
-                          <button
-                            onClick={() => setOpenMenu(openMenu === tagId ? null : tagId)}
-                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg"
-                          >
-                            <MoreHorizontal size={16} />
-                          </button>
-                          {openMenu === tagId && (
-                            <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[140px] py-1">
-                              <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                                <Eye size={14} /> View
-                              </button>
-                              <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                                <Edit2 size={14} /> Edit
-                              </button>
-                              <button 
-                                onClick={() => handleDelete(tagId)}
-                                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-                              >
-                                <Trash2 size={14} /> Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <button
+                          onClick={(e) => openDropdown(tagId, e)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
                       </td>
                     </tr>
                   )
@@ -298,19 +343,84 @@ export default function AdminTags() {
               </tbody>
             </table>
           </div>
+
+          {/* ─── PAGINATION CONTROLS ─── */}
+          <div className="flex items-center justify-between px-4 py-3 bg-gray-50/50 border-t border-gray-100">
+            <p className="text-xs text-gray-500">
+              Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
+              <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> of{' '}
+              <span className="font-medium">{totalItems}</span> tags
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={!hasPreviousPage}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                Previous
+              </button>
+              <span className="text-sm font-medium text-gray-700 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={!hasNextPage}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+
+      {/* ─── DROPDOWN MENU ─── */}
+      {openMenu && (
+        <>
+          <div className="fixed inset-0 z-[997]" onClick={() => setOpenMenu(null)} />
+          <div
+            className="fixed bg-white border border-gray-200 rounded-xl shadow-lg z-[999] py-1 min-w-[160px]"
+            style={{
+              top: menuPosition.top,
+              left: menuPosition.left,
+            }}
+          >
+            <button 
+              onClick={() => { setOpenMenu(null) }}
+              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Eye size={14} /> View
+            </button>
+            <button 
+              onClick={() => { setOpenMenu(null) }}
+              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Edit2 size={14} /> Edit
+            </button>
+            <button 
+              onClick={() => {
+                handleDelete(openMenu)
+                setOpenMenu(null)
+              }}
+              className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
 }
 
-// ─── GENERATE TAG FULL PAGE ───
+// ─── GENERATE TAG FULL PAGE (WITH FORM PERSISTENCE) ───
 function GenerateTagPage({ onBack, onSuccess }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
   
-  const [formData, setFormData] = useState({
+  // ✅ Use useFormPersistence for all form fields
+  const [formData, setFormData, clearSavedForm] = useFormPersistence("admin_generate_tag", {
     productType: 'T-Shirt',
     color: '',
     size: '',
@@ -361,11 +471,13 @@ function GenerateTagPage({ onBack, onSuccess }) {
 
       console.log('📤 Generating tag with payload:', payload)
 
-      // Generate tag
       const response = await tagsAPI.create(payload)
       console.log('✅ Tag generated:', response)
 
       setSuccess(true)
+      // ✅ Clear saved form after successful generation
+      clearSavedForm()
+      
       setTimeout(() => {
         onSuccess()
       }, 1500)
@@ -375,6 +487,12 @@ function GenerateTagPage({ onBack, onSuccess }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleBack = () => {
+    // ✅ Clear saved form when navigating back
+    clearSavedForm()
+    onBack()
   }
 
   return (
@@ -387,7 +505,7 @@ function GenerateTagPage({ onBack, onSuccess }) {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={onBack}
+            onClick={handleBack}
             className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
           >
             <ArrowLeft size={16} />

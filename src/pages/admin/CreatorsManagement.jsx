@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { adminAPI } from '../../services/apiClient'
+import { useFormPersistence } from '../../hooks/useFormPersistence'
 
 export default function CreatorsManagement() {
   const [creators, setCreators] = useState([])
@@ -13,11 +14,20 @@ export default function CreatorsManagement() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('All')
-  const [viewMode, setViewMode] = useState('list') // 'list' | 'add'
+  const [viewMode, setViewMode] = useState('list')
   const [selectedCreatorId, setSelectedCreatorId] = useState(null)
-  const [loadedData, setLoadedData] = useState(null) // Stores loaded creator data
+  const [loadedData, setLoadedData] = useState(null)
 
-  // ─── Load Creators from API (REAL DATA) ───
+  const [viewModePersisted, setViewModePersisted] = useState(() => {
+    const saved = sessionStorage.getItem('creators_view_mode')
+    return saved || 'list'
+  })
+
+  useEffect(() => {
+    sessionStorage.setItem('creators_view_mode', viewModePersisted)
+  }, [viewModePersisted])
+
+  // ─── Load ONLY Artists from API ───
   const loadCreators = async () => {
     try {
       setLoading(true)
@@ -32,7 +42,13 @@ export default function CreatorsManagement() {
       else if (Array.isArray(res)) list = res
       else if (res.creators && Array.isArray(res.creators)) list = res.creators
       
-      setCreators(list)
+      // ✅ Filter: ONLY show Artists (NOT Staff/Admins)
+      const artistsOnly = list.filter(u => {
+        const type = (u.accountType || u.role || u.userType || '').toUpperCase()
+        return type === 'ARTIST' || type === 'CREATOR'
+      })
+      
+      setCreators(artistsOnly)
     } catch (err) {
       console.error('Failed to load creators:', err)
       setError(err.message || 'Failed to load creators')
@@ -45,7 +61,7 @@ export default function CreatorsManagement() {
     loadCreators()
   }, [])
 
-  // ─── HELPER: Extract creator name (handles multiple field names) ───
+  // ─── HELPER: Extract creator name ───
   const getCreatorName = (creator) => {
     return creator.firstName || creator.name || creator.fullName || creator.username || 'Unknown Creator'
   }
@@ -55,12 +71,14 @@ export default function CreatorsManagement() {
     return creator.userName || creator.username || creator.handle || `@${creator.email?.split('@')[0] || 'user'}`
   }
 
-  // ─── HELPER: Check if creator is active ───
+  // ─── HELPER: Check if creator is active (USES accountStatus) ───
   const isCreatorActive = (creator) => {
-    return creator.status === 'Active' || 
-           creator.accountStatus === 'ACTIVE' || 
+    // ✅ Swagger uses `accountStatus` field
+    const status = (creator.accountStatus || creator.status || '').toUpperCase()
+    return status === 'ACTIVE' || 
+           status === 'ACTIVE' || 
            creator.isActive === true ||
-           creator.status === 'active'
+           status === 'ACTIVE'
   }
 
   // ─── Filter creators based on tab and search ───
@@ -81,13 +99,11 @@ export default function CreatorsManagement() {
     return matchesSearch && matchesTab
   })
 
-  // ✅ FIXED: Actually calls the delete API
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this creator?')) return
     try {
       setLoading(true)
-      // Call the actual delete API
-      await adminAPI.deleteCreator(id) // NEED TO ADD THIS TO adminAPI
+      await adminAPI.deleteCreator(id)
       setCreators(creators.filter(c => (c._id || c.id) !== id))
       alert('Creator deleted successfully!')
     } catch (err) {
@@ -98,14 +114,12 @@ export default function CreatorsManagement() {
     }
   }
 
-  // ✅ FIXED: Actually displays the loaded data
   const handleLoadData = async (creatorId) => {
     try {
       setLoading(true)
       const res = await adminAPI.getCreatorFans(creatorId)
       console.log('📊 Creator data loaded:', res)
       
-      // Extract fan data
       const fans = Array.isArray(res.data) ? res.data : (res.data?.fans || res.fans || [])
       
       setLoadedData({
@@ -114,7 +128,6 @@ export default function CreatorsManagement() {
         totalFans: fans.length
       })
       
-      // Show the data in a modal/panel
       alert(`Loaded ${fans.length} fans for this creator!`)
     } catch (err) {
       console.error('Failed to load creator data:', err)
@@ -125,12 +138,12 @@ export default function CreatorsManagement() {
   }
 
   // ─── ADD CREATOR FULL PAGE ───
-  if (viewMode === 'add') {
+  if (viewModePersisted === 'add') {
     return (
       <AddCreatorPage
-        onBack={() => setViewMode('list')}
+        onBack={() => setViewModePersisted('list')}
         onSuccess={() => {
-          setViewMode('list')
+          setViewModePersisted('list')
           loadCreators()
         }}
       />
@@ -169,7 +182,7 @@ export default function CreatorsManagement() {
           </p>
         </div>
         <button
-          onClick={() => setViewMode('add')}
+          onClick={() => setViewModePersisted('add')}
           className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
         >
           <Plus size={16} />
@@ -328,7 +341,7 @@ export default function CreatorsManagement() {
 
 // ─── ADD CREATOR FULL PAGE (FIXED) ───
 function AddCreatorPage({ onBack, onSuccess }) {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData, clearSavedForm] = useFormPersistence("admin_add_creator", {
     firstName: '',
     lastName: '',
     userName: '',
@@ -350,7 +363,6 @@ function AddCreatorPage({ onBack, onSuccess }) {
       setLoading(true)
       setError(null)
       
-      // ✅ FIXED: Send correct Swagger fields
       const payload = {
         firstName: formData.firstName,
         lastName: formData.lastName,
@@ -364,6 +376,7 @@ function AddCreatorPage({ onBack, onSuccess }) {
       
       await adminAPI.registerCreator(payload)
       
+      clearSavedForm()
       onSuccess()
     } catch (err) {
       console.error('Failed to register creator:', err)
@@ -371,6 +384,11 @@ function AddCreatorPage({ onBack, onSuccess }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleBack = () => {
+    clearSavedForm()
+    onBack()
   }
 
   return (
@@ -382,7 +400,7 @@ function AddCreatorPage({ onBack, onSuccess }) {
           <p className="text-gray-500 text-sm mt-1">Onboard a creator to Intel Merch</p>
         </div>
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
         >
           <ArrowLeft size={16} />
@@ -506,7 +524,7 @@ function AddCreatorPage({ onBack, onSuccess }) {
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={onBack}
+              onClick={handleBack}
               className="px-6 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
             >
               Cancel

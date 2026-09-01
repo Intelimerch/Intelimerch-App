@@ -56,15 +56,16 @@ export default function SignIn() {
     setIsLoading(true)
 
     try {
-      // ✅ FIXED: Login and redirect based on role
+      // ✅ DEBUG: Log the full login response
       const response = await login(identifier, password)
-      console.log('✅ Login successful:', response)
+      console.log('✅ Login response:', JSON.stringify(response))
+      console.log('🎯 Account Type:', response?.user?.accountType || response?.accountType || response?.data?.accountType || 'USER')
 
       // ✅ FIXED: Get accountType from response
       const accountType = response?.user?.accountType || response?.accountType || response?.data?.accountType || 'USER'
       
       // ✅ FIXED: Redirect based on accountType
-      if (accountType === 'ADMIN' || accountType === 'INTERNAL_TEAM' || accountType === 'SUPER_ADMIN' || accountType === 'STAFF') {
+    if (accountType === 'ADMIN' || accountType === 'INTERNAL_TEAM' || accountType === 'INTERNAL' || accountType === 'SUPER_ADMIN' || accountType === 'STAFF') {
         navigate('/admin')
       } else {
         navigate('/dashboard')

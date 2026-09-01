@@ -1,417 +1,544 @@
-// src/pages/admin/AdminCreateCampaign.jsx
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import {
-  Calendar,
-  ChevronDown,
-  Plus,
-  ArrowLeft,
-  Loader2,
-  AlertCircle,
-  CheckCircle,
-  Check,
-} from "lucide-react";
-import { campaignAPI, perksAPI } from "../../services/apiClient"; // ✅ Use campaignAPI
+// src/pages/admin/CreatorsManagement.jsx
+import { useState, useEffect } from 'react'
+import { 
+  Search, Loader2, AlertCircle, 
+  Plus, ArrowLeft, Trash2, Database, Users, X
+} from 'lucide-react'
+import EmptyState from '../../components/EmptyState'
+import { adminAPI } from '../../services/apiClient'
+import { useFormPersistence } from '../../hooks/useFormPersistence'
 
-const mediaTypes = ["image", "video", "link"];
+export default function CreatorsManagement() {
+  const [creators, setCreators] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState('All')
+  const [viewMode, setViewMode] = useState('list')
+  const [selectedCreatorId, setSelectedCreatorId] = useState(null)
+  const [loadedData, setLoadedData] = useState(null)
 
-function validateCampaign(data) {
-  const errors = {};
-  if (!data.campaignName || data.campaignName.trim().length === 0) {
-    errors.campaignName = "Campaign name is required";
-  } else if (data.campaignName.trim().length < 2) {
-    errors.campaignName = "Campaign name must be at least 2 characters";
-  }
-  if (!data.startDate) errors.startDate = "Start date is required";
-  if (!data.endDate) errors.endDate = "End date is required";
-  if (data.startDate && data.endDate && data.startDate > data.endDate) {
-    errors.endDate = "End date must be after start date";
-  }
-  if (!data.selectedPerkIds || data.selectedPerkIds.length === 0) {
-    errors.perks = "Select at least one perk";
-  }
-  return errors;
-}
+  // ✅ Persist viewMode to sessionStorage
+  const [viewModePersisted, setViewModePersisted] = useState(() => {
+    const saved = sessionStorage.getItem('creators_view_mode')
+    return saved || 'list'
+  })
 
-export default function AdminCreateCampaign() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [apiError, setApiError] = useState(null);
-  const [fieldErrors, setFieldErrors] = useState({});
-  const [success, setSuccess] = useState(false);
-
-  const [campaignName, setCampaignName] = useState("");
-  const [status, setStatus] = useState("active");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [mediaType, setMediaType] = useState("image");
-  const [mediaFileName, setMediaFileName] = useState("");
-  const [mediaUrl, setMediaUrl] = useState("");
-
-  const [perks, setPerks] = useState([]);
-  const [selectedPerkIds, setSelectedPerkIds] = useState([]);
-  const [perksOpen, setPerksOpen] = useState(false);
-  const [loadingPerks, setLoadingPerks] = useState(true);
-
-  // ─── Load Perks (same as existing) ───
   useEffect(() => {
-    async function loadPerks() {
-      try {
-        const res = await perksAPI.getAll();
-        setPerks(res.data || []);
-      } catch (err) {
-        console.error("Failed to load perks:", err);
-      } finally {
-        setLoadingPerks(false);
-      }
-    }
-    loadPerks();
-  }, []);
+    sessionStorage.setItem('creators_view_mode', viewModePersisted)
+  }, [viewModePersisted])
 
-  const togglePerk = (id) => {
-    setSelectedPerkIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
-
-  const handleChange = (field, value) => {
-    const setters = {
-      campaignName: setCampaignName,
-      status: setStatus,
-      startDate: setStartDate,
-      endDate: setEndDate,
-      mediaType: setMediaType,
-      mediaUrl: setMediaUrl,
-    };
-    if (setters[field]) setters[field](value);
-    if (fieldErrors[field])
-      setFieldErrors((prev) => ({ ...prev, [field]: null }));
-    if (apiError) setApiError(null);
-    if (success) setSuccess(false);
-  };
-
-  const buildDummyMediaUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || "campaign-media")}`;
-
-  
-
-const handleSubmit = async (e) => {
-  e.preventDefault()
-  setFieldErrors({})
-  setApiError(null)
-  setSuccess(false)
-
-  const errors = validateCampaign({ campaignName, startDate, endDate, selectedPerkIds })
-  if (Object.keys(errors).length > 0) {
-    setFieldErrors(errors)
-    return
-  }
-
-  // Resolve mediaUrl BEFORE building payload — backend requires it to always be defined
-  let resolvedMediaUrl = 'https://placeholder.intelimerch.com/campaign-default.jpg'
-  if (mediaType === 'link' && mediaUrl) {
-    resolvedMediaUrl = mediaUrl
-  } else if ((mediaType === 'image' || mediaType === 'video') && mediaFileName) {
-    resolvedMediaUrl = buildDummyMediaUrl(mediaFileName)
-  }
-
-  setLoading(true)
-  try {
-    const payload = {
-      campaignName: campaignName.trim(),
-      perks: selectedPerkIds, // ✅ Array of ObjectIds (strings)
-      startDate: new Date(startDate).toISOString(), // ✅ ISO format
-      endDate: new Date(endDate).toISOString(), // ✅ ISO format
-      mediaType,
-      mediaUrl: resolvedMediaUrl,
-      status, // ✅ lowercase: 'active', 'draft', etc.
-    }
-
-    console.log('📤 Admin sending payload:', payload)
-
-    // ✅ Use campaignAPI.create() (POST /campaigns) - This endpoint works!
-    const response = await campaignAPI.create(payload)
-    console.log('✅ Admin campaign created:', response)
-    setSuccess(true)
-
-    const newCampaignId =
-      response.campaign?._id ||
-      response.campaign?.id ||
-      response.data?._id ||
-      response.data?.campaignId ||
-      response._id
-
-    setTimeout(() => {
-      // ✅ Navigate to AdminNewCampaign (the edit page)
-      navigate('/admin/campaigns/new', {
-        state: { campaignId: newCampaignId, campaignName: campaignName.trim() }
+  // ─── Load ONLY Artists from API ───
+  const loadCreators = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await adminAPI.getCreators()
+      console.log('📊 Creators API Response:', res)
+      
+      // Parse the response (handles multiple shapes)
+      let list = []
+      if (Array.isArray(res.data)) list = res.data
+      else if (res.data?.creators && Array.isArray(res.data.creators)) list = res.data.creators
+      else if (Array.isArray(res)) list = res
+      else if (res.creators && Array.isArray(res.creators)) list = res.creators
+      
+      // ✅ Filter: ONLY show Artists (NOT Staff/Admins)
+      const artistsOnly = list.filter(u => {
+        const type = (u.accountType || u.role || u.userType || '').toUpperCase()
+        return type === 'ARTIST' || type === 'CREATOR'
       })
-    }, 1000)
-  } catch (err) {
-    console.error('❌ Error creating campaign:', err)
-    setApiError(err.message || 'Failed to create campaign')
-  } finally {
-    setLoading(false)
+      
+      setCreators(artistsOnly)
+    } catch (err) {
+      console.error('Failed to load creators:', err)
+      setError(err.message || 'Failed to load creators')
+    } finally {
+      setLoading(false)
+    }
   }
-}
-  
 
-  const renderError = (field) =>
-    fieldErrors[field] ? (
-      <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
-        <AlertCircle size={14} />
-        <span>{fieldErrors[field]}</span>
+  useEffect(() => {
+    loadCreators()
+  }, [])
+
+  // ─── HELPER: Extract creator name ───
+  const getCreatorName = (creator) => {
+    return creator.firstName || creator.name || creator.fullName || creator.username || 'Unknown Creator'
+  }
+
+  // ─── HELPER: Extract creator username ───
+  const getCreatorUsername = (creator) => {
+    return creator.userName || creator.username || creator.handle || `@${creator.email?.split('@')[0] || 'user'}`
+  }
+
+  // ─── HELPER: Check if creator is active ───
+  const isCreatorActive = (creator) => {
+    return creator.status === 'Active' || 
+           creator.accountStatus === 'ACTIVE' || 
+           creator.isActive === true ||
+           creator.status === 'active'
+  }
+
+  // ─── Filter creators based on tab and search ───
+  const filteredCreators = creators.filter(c => {
+    const q = search.toLowerCase()
+    const fullName = getCreatorName(c).toLowerCase()
+    const username = getCreatorUsername(c).toLowerCase()
+    const matchesSearch = 
+      fullName.includes(q) ||
+      username.includes(q) ||
+      (c.email || '').toLowerCase().includes(q) ||
+      (c.phone || '').toLowerCase().includes(q)
+
+    let matchesTab = true
+    if (activeTab === 'Active') matchesTab = isCreatorActive(c)
+    if (activeTab === 'Inactive') matchesTab = !isCreatorActive(c)
+
+    return matchesSearch && matchesTab
+  })
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this creator?')) return
+    try {
+      setLoading(true)
+      await adminAPI.deleteCreator(id)
+      setCreators(creators.filter(c => (c._id || c.id) !== id))
+      alert('Creator deleted successfully!')
+    } catch (err) {
+      console.error('Failed to delete creator:', err)
+      alert(err.message || 'Failed to delete creator')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLoadData = async (creatorId) => {
+    try {
+      setLoading(true)
+      const res = await adminAPI.getCreatorFans(creatorId)
+      console.log('📊 Creator data loaded:', res)
+      
+      const fans = Array.isArray(res.data) ? res.data : (res.data?.fans || res.fans || [])
+      
+      setLoadedData({
+        creatorId,
+        fans,
+        totalFans: fans.length
+      })
+      
+      alert(`Loaded ${fans.length} fans for this creator!`)
+    } catch (err) {
+      console.error('Failed to load creator data:', err)
+      alert(err.message || 'Failed to load creator data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ─── ADD CREATOR FULL PAGE ───
+  if (viewModePersisted === 'add') {
+    return (
+      <AddCreatorPage
+        onBack={() => setViewModePersisted('list')}
+        onSuccess={() => {
+          setViewModePersisted('list')
+          loadCreators()
+        }}
+      />
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <Loader2 size={40} className="text-primary animate-spin mb-4" />
+        <p className="text-gray-500">Loading creators...</p>
       </div>
-    ) : null;
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <AlertCircle size={40} className="text-red-500 mb-4" />
+        <p className="text-red-500 text-center max-w-md">{error}</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="w-full">
-      <div className="flex items-center justify-between mb-6 w-full">
+    <div className="space-y-6">
+      {/* ─── HEADER ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Create New Campaign
-          </h1>
-          <p className="text-gray-500 text-sm">Create a new campaign</p>
+          <h1 className="text-2xl font-bold text-gray-900">Creators Management</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            <span className="font-semibold text-gray-700">{filteredCreators.length}</span> creators ·{' '}
+            <span className="font-semibold text-gray-700">
+              {filteredCreators.filter(c => isCreatorActive(c)).length}
+            </span> active
+          </p>
         </div>
         <button
-          onClick={() => navigate("/admin/campaigns")}
-          className="btn-outline w-auto px-5 text-sm"
+          onClick={() => setViewModePersisted('add')}
+          className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
         >
-          <ArrowLeft size={14} /> Back
+          <Plus size={16} />
+          Add Creator
         </button>
       </div>
 
-      <div className="w-full max-w-xl mx-auto">
-        <div className="card w-full">
-          <form onSubmit={handleSubmit} className="space-y-6 w-full">
-            {apiError && (
-              <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
-                <AlertCircle size={18} className="shrink-0 mt-0.5" />
-                <span>{apiError}</span>
-              </div>
-            )}
-            {success && (
-              <div className="bg-green-50 text-green-600 text-sm p-3 rounded-xl flex items-start gap-2">
-                <CheckCircle size={18} className="shrink-0 mt-0.5" />
-                <span>Campaign created successfully! Redirecting...</span>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Campaign Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                className={`input-field w-full ${fieldErrors.campaignName ? "border-red-500 focus:ring-red-500" : ""}`}
-                placeholder="enter campaign name"
-                value={campaignName}
-                onChange={(e) => handleChange("campaignName", e.target.value)}
-                disabled={loading || success}
-              />
-              {renderError("campaignName")}
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Campaign Status
-              </label>
-              <div className="relative">
-                <select
-                  value={status}
-                  onChange={(e) => handleChange("status", e.target.value)}
-                  className="input-field w-full appearance-none pr-10"
-                  disabled={loading || success}
-                >
-                  <option value="active">Active</option>
-                  <option value="draft">Draft</option>
-                  <option value="paused">Paused</option>
-                  <option value="completed">Completed</option>
-                </select>
-                <ChevronDown
-                  size={16}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <DateField
-                label="Start Date"
-                value={startDate}
-                onChange={(v) => handleChange("startDate", v)}
-                error={fieldErrors.startDate}
-                disabled={loading || success}
-              />
-              <DateField
-                label="End Date"
-                value={endDate}
-                onChange={(v) => handleChange("endDate", v)}
-                error={fieldErrors.endDate}
-                disabled={loading || success}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Campaign Media
-              </label>
-              <div className="flex gap-2 mb-2">
-                {mediaTypes.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setMediaType(t)}
-                    disabled={loading || success}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${mediaType === t ? "bg-primary text-white" : "bg-gray-100 text-gray-600"}`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-
-              {mediaType === "image" || mediaType === "video" ? (
-                <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={(e) =>
-                      setMediaFileName(e.target.files?.[0]?.name || "")
-                    }
-                    disabled={loading || success}
-                  />
-                  <span className="text-sm text-gray-500">
-                    {mediaFileName || "Tap to upload campaign banner"}
-                  </span>
-                </label>
-              ) : (
-                <input
-                  type="url"
-                  className="input-field w-full"
-                  placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
-                  value={mediaUrl}
-                  onChange={(e) => handleChange("mediaUrl", e.target.value)}
-                  disabled={loading || success}
-                />
-              )}
-              <p className="text-xs text-gray-400 mt-1">
-                {mediaType === "link"
-                  ? "Provide a direct URL to your media"
-                  : "Upload a file for your campaign banner"}
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Link Perks <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setPerksOpen((o) => !o)}
-                  disabled={loadingPerks || loading || success}
-                  className="input-field w-full text-left flex items-center justify-between"
-                >
-                  <span
-                    className={
-                      selectedPerkIds.length ? "text-gray-800" : "text-gray-400"
-                    }
-                  >
-                    {loadingPerks
-                      ? "Loading perks..."
-                      : selectedPerkIds.length
-                        ? `${selectedPerkIds.length} perk${selectedPerkIds.length > 1 ? "s" : ""} selected`
-                        : "Select perks to link to this campaign"}
-                  </span>
-                  <ChevronDown size={15} className="text-gray-400 shrink-0" />
-                </button>
-                {perksOpen && (
-                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
-                    {perks.length === 0 ? (
-                      <p className="px-4 py-2.5 text-sm text-gray-400">
-                        No perks found
-                      </p>
-                    ) : (
-                      perks.map((perk) => (
-                        <button
-                          key={perk._id}
-                          type="button"
-                          onClick={() => togglePerk(perk._id)}
-                          className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                        >
-                          <div
-                            className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${selectedPerkIds.includes(perk._id) ? "bg-primary border-primary" : "border-gray-300"}`}
-                          >
-                            {selectedPerkIds.includes(perk._id) && (
-                              <Check size={10} className="text-white" />
-                            )}
-                          </div>
-                          {perk.perkName}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-              {fieldErrors.perks && (
-                <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
-                  <AlertCircle size={14} />
-                  <span>{fieldErrors.perks}</span>
-                </div>
-              )}
-            </div>
-
+      {/* ─── FILTER TABS + SEARCH ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full p-1">
+          {['All', 'Active', 'Inactive'].map(tab => (
             <button
-              type="submit"
-              className="flex items-center gap-2 px-6 py-3 text-sm font-medium text-white bg-primary rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading || success}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
+                activeTab === tab 
+                  ? 'bg-yellow-500 text-white' 
+                  : 'text-gray-500 hover:bg-gray-100'
+              }`}
             >
-              {loading ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" /> Creating...
-                </>
-              ) : success ? (
-                <>
-                  <CheckCircle size={18} /> Created!
-                </>
-              ) : (
-                <>
-                  <Plus size={18} /> Create Campaign
-                </>
-              )}
+              {tab}
             </button>
-          </form>
+          ))}
+        </div>
+        
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-72 pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+          />
         </div>
       </div>
-    </div>
-  );
-}
 
-function DateField({ label, value, onChange, error, disabled }) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-        {label} <span className="text-red-500">*</span>
-      </label>
-      <div className="relative">
-        <input
-          type="date"
-          className={`input-field w-full pr-10 ${error ? "border-red-500 focus:ring-red-500" : ""}`}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
+      {/* ─── LOADED DATA PANEL ─── */}
+      {loadedData && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-blue-800">Loaded Data for Creator</h3>
+            <button onClick={() => setLoadedData(null)} className="p-1 text-blue-500 hover:bg-blue-100 rounded">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-sm text-blue-700 mb-2">Total Fans: <strong>{loadedData.totalFans}</strong></p>
+          {loadedData.fans.length > 0 && (
+            <ul className="space-y-1">
+              {loadedData.fans.slice(0, 5).map((fan, i) => (
+                <li key={i} className="text-sm text-blue-700">
+                  {fan.name || fan.firstName || fan.email || 'Fan'} - {fan.email || fan.phone || 'No contact'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* ─── CREATORS LIST (Full Width Cards) ─── */}
+      {filteredCreators.length === 0 ? (
+        <EmptyState
+          icon={<Users size={40} className="text-gray-300" />}
+          title="No creators found"
+          description="Try adjusting your search or add a new creator."
         />
-        <Calendar
-          size={18}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-        />
-      </div>
-      {error && (
-        <div className="flex items-center gap-1.5 mt-1.5 text-red-500 text-xs">
-          <AlertCircle size={14} />
-          <span>{error}</span>
+      ) : (
+        <div className="space-y-4">
+          {filteredCreators.map((creator) => {
+            const creatorId = creator._id || creator.id
+            const isSelected = selectedCreatorId === creatorId
+            const isActive = isCreatorActive(creator)
+            const creatorName = getCreatorName(creator)
+            const creatorUsername = getCreatorUsername(creator)
+            
+            return (
+              <div 
+                key={creatorId} 
+                className={`bg-white rounded-xl border p-6 transition-all ${
+                  isSelected 
+                    ? 'border-yellow-400 ring-2 ring-yellow-100' 
+                    : 'border-gray-200 hover:shadow-lg'
+                }`}
+                onClick={() => setSelectedCreatorId(creatorId)}
+              >
+                {/* Header - Avatar + Name + Status */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {creator.avatar || creator.profileImage ? (
+                        <img src={creator.avatar || creator.profileImage} alt="avatar" className="w-12 h-12 rounded-full object-cover" />
+                      ) : (
+                        <span className="text-lg font-bold text-gray-600">
+                          {creatorName[0]?.toUpperCase()}
+                          {creator.lastName?.[0]?.toUpperCase() || ''}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900 text-lg">
+                        {creatorName}
+                      </h3>
+                      <p className="text-sm text-gray-500">{creatorUsername}</p>
+                    </div>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                    isActive
+                      ? 'bg-green-50 text-green-600'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+
+                {/* Stats - Horizontal */}
+                <div className="flex gap-12 mb-5">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">TAGS</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.tagsCount ?? creator.tags ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">TOTAL SCANS</p>
+                    <p className="text-xl font-bold text-gray-900">{(creator.totalScans ?? creator.scans ?? creator.tapCount ?? 0).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">CAMPAIGN</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.campaignsCount ?? creator.campaigns ?? 0}</p>
+                  </div>
+                </div>
+
+                {/* Actions - Load Data + Delete */}
+                <div className="flex gap-3">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleLoadData(creatorId) }}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Database size={14} />
+                    Load Data
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDelete(creatorId) }}
+                    className="border border-red-200 text-red-500 hover:bg-red-50 px-5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
-  );
+  )
+}
+
+// ─── ADD CREATOR FULL PAGE (FIXED) ───
+function AddCreatorPage({ onBack, onSuccess }) {
+  const [formData, setFormData, clearSavedForm] = useFormPersistence("admin_add_creator", {
+    firstName: '',
+    lastName: '',
+    userName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    try {
+      setLoading(true)
+      setError(null)
+      
+      const payload = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        userName: formData.userName,
+        email: formData.email,
+        phone: formData.phone,
+        password: formData.password,
+      }
+
+      console.log('📤 Registering creator with payload:', payload)
+      
+      await adminAPI.registerCreator(payload)
+      
+      clearSavedForm()
+      onSuccess()
+    } catch (err) {
+      console.error('Failed to register creator:', err)
+      setError(err.message || 'Failed to register creator')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBack = () => {
+    clearSavedForm()
+    onBack()
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Add New Creator</h1>
+          <p className="text-gray-500 text-sm mt-1">Onboard a creator to Intel Merch</p>
+        </div>
+        <button
+          onClick={handleBack}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+        >
+          <ArrowLeft size={16} />
+          Back
+        </button>
+      </div>
+
+      {/* Form Card */}
+      <div className="bg-white rounded-xl border border-gray-200 p-8 max-w-2xl">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* First Name + Last Name */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                First Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Jenny"
+                value={formData.firstName}
+                onChange={(e) => setFormData({...formData, firstName: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Last Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Wilson"
+                value={formData.lastName}
+                onChange={(e) => setFormData({...formData, lastName: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Username */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+              Username <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. jenny"
+              value={formData.userName}
+              onChange={(e) => setFormData({...formData, userName: e.target.value})}
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              required
+            />
+          </div>
+
+          {/* Email + Phone */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Email <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="email"
+                placeholder="@youremail"
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Phone
+              </label>
+              <input
+                type="tel"
+                placeholder="+1234567890"
+                value={formData.phone}
+                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {/* Password + Confirm */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                placeholder="Create a password"
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Confirm Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                placeholder="Confirm password"
+                value={formData.confirmPassword}
+                onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="px-6 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {loading && <Loader2 size={16} className="animate-spin" />}
+              {loading ? 'Creating...' : 'Create Account'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }

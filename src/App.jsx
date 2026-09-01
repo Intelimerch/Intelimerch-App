@@ -51,6 +51,7 @@ import AdminCampaigns from './pages/admin/AdminCampaigns'
 import AdminAnalytics from './pages/admin/AdminAnalytics'
 import AdminTags from './pages/admin/AdminTags'
 import AdminCreateCampaign from './pages/admin/AdminCreateCampaign'
+import AdminSettings from './pages/admin/AdminSettings'
 import AdminPerks from './pages/admin/AdminPerks'
 import AdminNewCampaign from './pages/admin/AdminNewCampaign'
 
@@ -83,7 +84,7 @@ function AdminRoute({ children }) {
 
   // ✅ FIXED: Check accountType (from Swagger response)
   const accountType = user.accountType || user.role || ''
-  const isAdmin = ['ADMIN', 'INTERNAL_TEAM', 'SUPER_ADMIN', 'STAFF'].includes(accountType)
+  const isAdmin = ['ADMIN', 'INTERNAL_TEAM', 'INTERNAL', 'SUPER_ADMIN', 'STAFF'].includes(accountType)
 
   if (!isAdmin) {
     return <Navigate to="/dashboard" replace />
@@ -156,6 +157,7 @@ export default function App() {
               <Route path="campaigns" element={<AdminCampaigns />} />
               <Route path="campaigns/new" element={<AdminNewCampaign />} />
               <Route path="analytics" element={<AdminAnalytics />} />
+              <Route path="settings" element={<AdminSettings />} />
               <Route path="perks" element={<AdminPerks />} />
               <Route path="tags" element={<AdminTags />} />
             </Route>

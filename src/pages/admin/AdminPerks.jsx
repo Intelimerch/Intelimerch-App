@@ -9,6 +9,7 @@ import {
 import EmptyState from '../../components/EmptyState'
 import { perksAPI, adminAPI } from '../../services/apiClient'
 import { useAuth } from '../../context/AuthContext'
+import { useFormPersistence } from '../../hooks/useFormPersistence'
 
 // Map perk types to icons and colors
 const PERK_TYPE_STYLES = {
@@ -28,8 +29,30 @@ export default function AdminPerks() {
   const [selectedArtistId, setSelectedArtistId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [viewMode, setViewMode] = useState('list') // 'list' | 'upload' | 'edit'
-  const [editingPerkId, setEditingPerkId] = useState(null)
+  
+  // ✅ Persist viewMode & editingPerkId to sessionStorage
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = sessionStorage.getItem('admin_perks_view_mode')
+    return saved || 'list' // 'list' | 'upload' | 'edit'
+  })
+
+  const [editingPerkId, setEditingPerkId] = useState(() => {
+    const saved = sessionStorage.getItem('admin_perks_editing_id')
+    return saved || null
+  })
+
+  // ✅ Persist viewMode & editingPerkId
+  useEffect(() => {
+    sessionStorage.setItem('admin_perks_view_mode', viewMode)
+  }, [viewMode])
+
+  useEffect(() => {
+    if (editingPerkId) {
+      sessionStorage.setItem('admin_perks_editing_id', editingPerkId)
+    } else {
+      sessionStorage.removeItem('admin_perks_editing_id')
+    }
+  }, [editingPerkId])
 
   // ─── Load Perks, Categories, and Creators ───
   const loadData = async () => {
@@ -302,14 +325,17 @@ export default function AdminPerks() {
   )
 }
 
-// ─── PERK FORM PAGE (Handles both Upload and Edit) ───
+// ─── PERK FORM PAGE (Handles both Upload and Edit) WITH FORM PERSISTENCE ───
 function PerkFormPage({ mode, perk, artistId, categories, creators, onBack, onSuccess }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
   const [selectedArtist, setSelectedArtist] = useState(artistId || '')
   
-  const [formData, setFormData] = useState({
+  // ✅ Use useFormPersistence for form fields
+  const storageKey = mode === 'edit' ? `admin_edit_perk_${perk?._id || perk?.id}` : 'admin_upload_perk'
+  
+  const [formData, setFormData, clearSavedForm] = useFormPersistence(storageKey, {
     perkName: perk?.perkName || perk?.name || '',
     perkCategoryId: perk?.perkCategoryId || '',
     contentType: perk?.contentType || perk?.perkType || 'video',
@@ -367,6 +393,9 @@ function PerkFormPage({ mode, perk, artistId, categories, creators, onBack, onSu
       console.log(`✅ Perk ${isEditMode ? 'updated' : 'uploaded'}:`, response)
 
       setSuccess(true)
+      // ✅ Clear saved form after success
+      clearSavedForm()
+      
       setTimeout(() => {
         onSuccess()
       }, 1500)
@@ -376,6 +405,12 @@ function PerkFormPage({ mode, perk, artistId, categories, creators, onBack, onSu
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleBack = () => {
+    // ✅ Clear saved form when navigating back
+    clearSavedForm()
+    onBack()
   }
 
   const perkTypes = [
@@ -399,7 +434,7 @@ function PerkFormPage({ mode, perk, artistId, categories, creators, onBack, onSu
           </p>
         </div>
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
         >
           <ArrowLeft size={16} />
@@ -532,7 +567,7 @@ function PerkFormPage({ mode, perk, artistId, categories, creators, onBack, onSu
           <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
-              onClick={onBack}
+              onClick={handleBack}
               className="px-6 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
             >
               Cancel
