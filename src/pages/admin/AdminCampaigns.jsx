@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { campaignAPI } from '../../services/apiClient'
+import ServerError from '../../components/ServerError'
 
 const PAGE_SIZE = 20
 
@@ -20,9 +21,8 @@ export default function AdminCampaigns() {
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('All')
   const [openMenu, setOpenMenu] = useState(null)
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 }) // ✅ Add menu position
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
 
-  // ─── Pagination State ───
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
@@ -30,12 +30,10 @@ export default function AdminCampaigns() {
   const [hasPreviousPage, setHasPreviousPage] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
-  // Get user's name for the header
   const adminName = user?.firstName 
     ? `${user.firstName} ${user.lastName || ''}`
     : user?.name || 'Admin'
 
-  // ─── Load Campaigns from API with Pagination ───
   const loadCampaigns = async (page = 1) => {
     try {
       setLoading(true)
@@ -43,7 +41,6 @@ export default function AdminCampaigns() {
       const res = await campaignAPI.getAll(page, PAGE_SIZE)
       console.log('📊 Campaigns fetched:', res)
       
-      // Parse the response (handles multiple shapes)
       let list = []
       if (Array.isArray(res.data)) list = res.data
       else if (res.data?.campaigns && Array.isArray(res.data.campaigns)) list = res.data.campaigns
@@ -52,7 +49,6 @@ export default function AdminCampaigns() {
       
       setCampaigns(list)
       
-      // ─── Handle Pagination ───
       const pagination = res.pagination
       if (pagination && pagination.totalPages) {
         setCurrentPage(pagination.page || 1)
@@ -62,7 +58,6 @@ export default function AdminCampaigns() {
         setHasPreviousPage(pagination.hasPreviousPage || false)
         setPageSize(pagination.limit || PAGE_SIZE)
       } else {
-        // Backend doesn't support pagination - calculate from data
         const total = list.length
         const calculatedTotalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
         setCurrentPage(page)
@@ -84,13 +79,11 @@ export default function AdminCampaigns() {
     loadCampaigns(1)
   }, [])
 
-  // ─── Reset to Page 1 on Filter Change ───
   useEffect(() => {
     loadCampaigns(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  // ─── Handle Page Change ───
   const handlePageChange = (newPage) => {
     if (newPage < 1 || newPage > totalPages) return
     setCurrentPage(newPage)
@@ -98,28 +91,24 @@ export default function AdminCampaigns() {
     setOpenMenu(null)
   }
 
-  // ─── HELPER: Check if campaign is active ───
   const isCampaignActive = (campaign) => {
     return campaign.status === 'Active' || 
            campaign.status === 'active' || 
            campaign.status === 'ACTIVE'
   }
 
-  // ─── HELPER: Check if campaign is paused ───
   const isCampaignPaused = (campaign) => {
     return campaign.status === 'Paused' || 
            campaign.status === 'paused' || 
            campaign.status === 'PAUSED'
   }
 
-  // ─── HELPER: Check if campaign is draft ───
   const isCampaignDraft = (campaign) => {
     return campaign.status === 'Draft' || 
            campaign.status === 'draft' || 
            campaign.status === 'DRAFT'
   }
 
-  // ─── Get campaign status label ───
   const getStatusLabel = (campaign) => {
     if (isCampaignActive(campaign)) return 'Active'
     if (isCampaignPaused(campaign)) return 'Paused'
@@ -127,7 +116,6 @@ export default function AdminCampaigns() {
     return campaign.status || 'Unknown'
   }
 
-  // ─── Get campaign status color ───
   const getStatusColor = (campaign) => {
     if (isCampaignActive(campaign)) return 'bg-green-50 text-green-600'
     if (isCampaignPaused(campaign)) return 'bg-red-50 text-red-500'
@@ -135,7 +123,6 @@ export default function AdminCampaigns() {
     return 'bg-gray-100 text-gray-600'
   }
 
-  // ─── Filter campaigns based on tab and search (current page only) ───
   const filteredCampaigns = campaigns.filter(campaign => {
     const q = search.toLowerCase()
     const campaignName = campaign.campaignName || campaign.name || ''
@@ -153,14 +140,12 @@ export default function AdminCampaigns() {
     if (!window.confirm('Are you sure you want to delete this campaign?')) return
     try {
       await campaignAPI.delete(id)
-      // Refresh current page after delete
       loadCampaigns(currentPage)
     } catch (err) {
       alert(err.message || 'Failed to delete campaign')
     }
   }
 
-  // ─── Open Menu with Position (FIXED) ───
   const openDropdown = (id, e) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const dropdownWidth = 160
@@ -169,7 +154,6 @@ export default function AdminCampaigns() {
     let left = rect.right - dropdownWidth
     let top = rect.bottom + 4
 
-    // Keep within viewport
     if (left < 10) left = 10
     if (left + dropdownWidth > window.innerWidth - 10) left = window.innerWidth - dropdownWidth - 10
     if (top + dropdownHeight > window.innerHeight - 10) top = rect.top - dropdownHeight - 4
@@ -189,17 +173,11 @@ export default function AdminCampaigns() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-      </div>
-    )
+    return <ServerError onRetry={() => loadCampaigns(currentPage)} />
   }
 
   return (
     <div className="space-y-6">
-      {/* ─── HEADER ─── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{adminName} Campaigns</h1>
@@ -213,7 +191,6 @@ export default function AdminCampaigns() {
         </button>
       </div>
 
-      {/* ─── FILTER TABS + SEARCH ─── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full p-1">
           {['All', 'Active', 'Paused', 'Draft'].map(tab => (
@@ -246,7 +223,6 @@ export default function AdminCampaigns() {
         </div>
       </div>
 
-      {/* ─── TABLE ─── */}
       {filteredCampaigns.length === 0 ? (
         <EmptyState
           icon={<Megaphone size={40} className="text-gray-300" />}
@@ -254,7 +230,7 @@ export default function AdminCampaigns() {
           description="Try adjusting your search or create a new campaign."
         />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden relative"> {/* ✅ Added relative */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden relative">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[900px]">
               <thead>
@@ -300,7 +276,6 @@ export default function AdminCampaigns() {
             </table>
           </div>
 
-          {/* ─── PAGINATION CONTROLS ─── */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-50/50 border-t border-gray-100">
             <p className="text-xs text-gray-500">
               Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
@@ -330,7 +305,6 @@ export default function AdminCampaigns() {
         </div>
       )}
 
-      {/* ─── DROPDOWN MENU (Fixed - Outside Table, Uses Fixed Position) ─── */}
       {openMenu && (
         <>
           <div className="fixed inset-0 z-[997]" onClick={() => setOpenMenu(null)} />

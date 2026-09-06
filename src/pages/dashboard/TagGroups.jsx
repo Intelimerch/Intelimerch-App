@@ -1,3 +1,4 @@
+// src/pages/dashboard/TagGroups.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -6,6 +7,7 @@ import {
 } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { tagsAPI, campaignAPI } from '../../services/apiClient'
+import ServerError from '../../components/ServerError'
 
 const statusLabel = {
   unassigned: 'Not Linked',
@@ -174,6 +176,10 @@ export default function TagGroups() {
     return matchType && matchSearch
   })
 
+  if (error) {
+    return <ServerError onRetry={() => loadTags()} />
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* ─── PAGE HEADER ─── */}
@@ -300,22 +306,6 @@ export default function TagGroups() {
         <div className="flex flex-col items-center justify-center min-h-[300px] bg-white rounded-xl border border-gray-200">
           <Loader2 size={36} className="text-primary animate-spin mb-3" />
           <p className="text-gray-400">Loading tags…</p>
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center justify-center min-h-[300px] bg-white rounded-xl border border-gray-200">
-          <AlertCircle size={36} className="text-red-500 mb-3" />
-          <p className="text-red-500 text-center max-w-sm">{error}</p>
-          <button 
-            onClick={() => {
-              setSelectedCampaignId('')
-              setTimeout(() => {
-                if (campaignIdFromUrl) setSelectedCampaignId(campaignIdFromUrl)
-              }, 100)
-            }} 
-            className="px-6 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary/90 transition-all mt-3"
-          >
-            Retry
-          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

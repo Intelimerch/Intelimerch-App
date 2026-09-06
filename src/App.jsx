@@ -1,8 +1,10 @@
 // src/App.jsx
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { useAuth } from './context/AuthContext'
-import { FormProvider } from './context/FormContext' 
+import { FormProvider } from './context/FormContext'
+import ServerError from './components/ServerError';
 
 // Auth Pages
 import SignUp from './pages/auth/SignUp'
@@ -55,6 +57,9 @@ import AdminSettings from './pages/admin/AdminSettings'
 import AdminPerks from './pages/admin/AdminPerks'
 import AdminNewCampaign from './pages/admin/AdminNewCampaign'
 
+// 404 Page
+import NotFound from './pages/NotFound';
+
 // ─── Protected Route Component ───
 function ProtectedRoute({ children }) {
   const { user, isLoading } = useAuth()
@@ -82,7 +87,6 @@ function AdminRoute({ children }) {
     return <Navigate to="/signin" replace />
   }
 
-  // ✅ FIXED: Check accountType (from Swagger response)
   const accountType = user.accountType || user.role || ''
   const isAdmin = ['ADMIN', 'INTERNAL_TEAM', 'INTERNAL', 'SUPER_ADMIN', 'STAFF'].includes(accountType)
 
@@ -93,76 +97,106 @@ function AdminRoute({ children }) {
   return children
 }
 
+// ─── Global Error Boundary ───
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <ServerError onRetry={() => window.location.reload()} />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
     <AuthProvider>
-      <FormProvider> {/* ✅ Wrap everything with FormProvider */}
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Navigate to="/signin" replace />} />
+      <FormProvider>
+        <ErrorBoundary>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Navigate to="/signin" replace />} />
 
-            {/* Auth */}
-            <Route path="/signup" element={<SignUp />} />
-            <Route path="/signin" element={<SignIn />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/verify" element={<VerifyAccount />} />
+              {/* Auth */}
+              <Route path="/signup" element={<SignUp />} />
+              <Route path="/signin" element={<SignIn />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/verify" element={<VerifyAccount />} />
 
-            {/* Creator Dashboard - Protected */}
-            <Route path="/dashboard" element={
-              <ProtectedRoute>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Overview />} />
-              <Route path="campaigns" element={<Campaigns />} />
-              <Route path="campaigns/create" element={<CreateCampaign />} />
-              <Route path="campaigns/new" element={<NewCampaign />} />
-              <Route path="campaigns/:campaignId/analytics" element={<CampaignAnalytics />} />
-              
-              <Route path="products" element={<Products />} />
-              <Route path="products/add" element={<AddProduct />} />
-              <Route path="products/edit/:productId" element={<EditProduct />} />
-              <Route path="products/assign/:productId" element={<AssignToCampaign />} />
-              
-              <Route path="fans" element={<Fans />} />
-              <Route path="perks" element={<PerksLibrary />} />
-              <Route path="perks/upload" element={<UploadPerk />} />
-              <Route path="tag-groups" element={<TagGroups />} />
-              <Route path="profile" element={<Profile />} />
-              <Route path="notifications" element={<Notifications />} />
-            </Route>
+              {/* Creator Dashboard - Protected */}
+              <Route path="/dashboard" element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<Overview />} />
+                <Route path="campaigns" element={<Campaigns />} />
+                <Route path="campaigns/create" element={<CreateCampaign />} />
+                <Route path="campaigns/new" element={<NewCampaign />} />
+                <Route path="campaigns/:campaignId/analytics" element={<CampaignAnalytics />} />
+                
+                <Route path="products" element={<Products />} />
+                <Route path="products/add" element={<AddProduct />} />
+                <Route path="products/edit/:productId" element={<EditProduct />} />
+                <Route path="products/assign/:productId" element={<AssignToCampaign />} />
+                
+                <Route path="fans" element={<Fans />} />
+                <Route path="perks" element={<PerksLibrary />} />
+                <Route path="perks/upload" element={<UploadPerk />} />
+                <Route path="tag-groups" element={<TagGroups />} />
+                <Route path="profile" element={<Profile />} />
+                <Route path="notifications" element={<Notifications />} />
+              </Route>
 
-            {/* Fan (mobile) */}
-            <Route path="/nfc/io/:tagId" element={<TapEntry />} />
-            <Route path="/fan/activate" element={<ActivateMerch />} />
-            <Route path="/fan/activated" element={<Activated />} />
-            <Route path="/fan/claimed" element={<AlreadyClaimed />} />
-            <Route path="/fan/perks" element={<PerksLanding />} />
-            <Route path="/fan/perks/video" element={<VideoPerk />} />
-            <Route path="/fan/perks/discount" element={<DiscountPerk />} />
-            <Route path="/fan/perks/audio" element={<AudioPerk />} />
-            <Route path="/fan/perks/image" element={<ImagePerk />} />
-            <Route path="/fan/perks/document" element={<DocumentPerk />} />
-            <Route path="/fan/perks/link" element={<LinkPerk />} />
+              {/* Fan (mobile) */}
+              <Route path="/nfc/io/:tagId" element={<TapEntry />} />
+              <Route path="/fan/activate" element={<ActivateMerch />} />
+              <Route path="/fan/activated" element={<Activated />} />
+              <Route path="/fan/claimed" element={<AlreadyClaimed />} />
+              <Route path="/fan/perks" element={<PerksLanding />} />
+              <Route path="/fan/perks/video" element={<VideoPerk />} />
+              <Route path="/fan/perks/discount" element={<DiscountPerk />} />
+              <Route path="/fan/perks/audio" element={<AudioPerk />} />
+              <Route path="/fan/perks/image" element={<ImagePerk />} />
+              <Route path="/fan/perks/document" element={<DocumentPerk />} />
+              <Route path="/fan/perks/link" element={<LinkPerk />} />
 
-            {/* Admin - Protected (FIXED) */}
-            <Route path="/admin" element={
-              <AdminRoute>
-                <AdminLayout />
-              </AdminRoute>
-            }>
-              <Route index element={<AdminOverview />} />
-              <Route path="creators" element={<CreatorsManagement />} />
-              <Route path="campaigns/create" element={<AdminCreateCampaign />} />
-              <Route path="campaigns" element={<AdminCampaigns />} />
-              <Route path="campaigns/new" element={<AdminNewCampaign />} />
-              <Route path="analytics" element={<AdminAnalytics />} />
-              <Route path="settings" element={<AdminSettings />} />
-              <Route path="perks" element={<AdminPerks />} />
-              <Route path="tags" element={<AdminTags />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
+              {/* Admin - Protected (FIXED) */}
+              <Route path="/admin" element={
+                <AdminRoute>
+                  <AdminLayout />
+                </AdminRoute>
+              }>
+                <Route index element={<AdminOverview />} />
+                <Route path="creators" element={<CreatorsManagement />} />
+                <Route path="campaigns/create" element={<AdminCreateCampaign />} />
+                <Route path="campaigns" element={<AdminCampaigns />} />
+                <Route path="campaigns/new" element={<AdminNewCampaign />} />
+                <Route path="analytics" element={<AdminAnalytics />} />
+                <Route path="settings" element={<AdminSettings />} />
+                <Route path="perks" element={<AdminPerks />} />
+                <Route path="tags" element={<AdminTags />} />
+              </Route>
+
+              {/* 404 Page */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </ErrorBoundary>
       </FormProvider>
     </AuthProvider>
   )

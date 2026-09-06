@@ -8,6 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart as RePieChart, Pie, Cell
 } from 'recharts'
+import ServerError from '../../components/ServerError'
 import { analyticsAPI, adminAPI } from '../../services/apiClient'
 
 const PIE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EF4444']
@@ -132,12 +133,7 @@ export default function AdminAnalytics() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-      </div>
-    )
+    return <ServerError onRetry={fetchAnalytics} />
   }
 
   return (

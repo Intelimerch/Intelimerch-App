@@ -15,7 +15,7 @@ const AUTH_ENTRY_ENDPOINTS = [
   '/auth/login',
   '/auth/register-artist',
   '/auth/register-internal-team',
-  '/taps', // Keep this for backward compatibility
+  '/taps', // ✅ CORRECT: Use /taps (matches actual backend mounting)
 ];
 
 function isAuthEntryEndpoint(endpoint) {
@@ -93,7 +93,7 @@ export async function apiRequest(endpoint, options = {}) {
       const text = await response.text();
       if (!response.ok) {
         throw new ApiError(
-          'Server error. Please check your connection and try again.',
+          'We are having trouble connecting to the server. Please try again.',
           response.status,
           'SERVER_ERROR'
         );
@@ -103,7 +103,7 @@ export async function apiRequest(endpoint, options = {}) {
 
     if (!response.ok) {
       throw new ApiError(
-        data.message || data.error || 'API request failed',
+        data.message || data.error || 'Request failed. Please try again.',
         response.status,
         data.code
       );
@@ -113,28 +113,32 @@ export async function apiRequest(endpoint, options = {}) {
   } catch (error) {
     clearTimeout(timeoutId);
 
+    // ─── Handle AbortError (timeout) ───
     if (error.name === 'AbortError') {
       throw new ApiError(
-        'Request timed out. Please check your connection and try again.',
+        'Connection timed out. Please check your internet connection and try again.',
         408,
         'TIMEOUT'
       );
     }
 
+    // ─── Handle Network Errors ───
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
       throw new ApiError(
-        'Network error. Please check your internet connection.',
+        'Unable to connect to the server. Please check your internet connection.',
         0,
         'NETWORK_ERROR'
       );
     }
 
+    // ─── Handle Already Thrown ApiError ───
     if (error instanceof ApiError) {
       throw error;
     }
 
+    // ─── Handle Unknown Errors ───
     throw new ApiError(
-      error.message || 'An unexpected error occurred. Please try again.',
+      'Something went wrong. Please try again.',
       500,
       'UNKNOWN_ERROR'
     );
@@ -320,7 +324,7 @@ export const analyticsAPI = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// NFC TAP / FAN FLOW (MATCHING SWAGGER EXACTLY)
+// NFC TAP / FAN FLOW (ONCE - No duplicates) - Mounted at /taps
 // ══════════════════════════════════════════════════════════════════
 
 export const getOwnerToken = () => localStorage.getItem('ownerToken');
@@ -369,7 +373,10 @@ export async function getDeviceInfo() {
             ip,
             latitude: location.latitude,
             longitude: location.longitude,
-            accuracy: location.accuracy
+            accuracy: location.accuracy,
+            country: "Unknown",
+            state: "Unknown",
+            city: "Unknown"
         };
     } catch (error) {
         console.error("Error getting device info:", error);
@@ -377,16 +384,19 @@ export async function getDeviceInfo() {
             ip: null,
             latitude: null,
             longitude: null,
-            accuracy: null
+            accuracy: null,
+            country: "Unknown",
+            state: "Unknown",
+            city: "Unknown"
         };
     }
 }
 
-// ── Tap APIs (MATCHING SWAGGER EXACTLY) ──
+// ── Tap APIs (MOUNTED AT /taps - MATCHES ACTUAL BACKEND) ──
 export const tapAPI = {
-  // POST /tags/:tagId/tap  ← FIXED to /tags/
+  // POST /taps/:tagId/tap  ← CORRECT
   tap: async (tagId, { ownerToken, deviceType, location, ip, latitude, longitude, accuracy } = {}) => {
-    return api.post(`/tags/${tagId}/tap`, {
+    return api.post(`/taps/${tagId}/tap`, {
       ...(ownerToken && { ownerToken }),
       deviceType: deviceType || detectDeviceType(),
       ...(location && { location }),
@@ -397,7 +407,7 @@ export const tapAPI = {
     });
   },
 
-  // POST /nfc/activate  ← FIXED to /nfc/activate
+  // POST /taps/nfc/activate  ← CORRECT
   activate: async ({
     tapToken,
     ownerToken,
@@ -413,7 +423,7 @@ export const tapAPI = {
     longitude,
     accuracy,
   }) => {
-    return api.post('/nfc/activate', {
+    return api.post('/taps/nfc/activate', {
       tapToken,
       ...(ownerToken && { ownerToken }),
       firstName,
@@ -430,16 +440,16 @@ export const tapAPI = {
     });
   },
 
-  // GET /nfc/campaign-page-resources  ← FIXED to /nfc/
+  // GET /taps/nfc/campaign-page-resources  ← CORRECT
   getCampaignResources: ({ tapToken, ownerToken }) => {
     const params = new URLSearchParams({ tapToken, ownerToken });
-    return api.get(`/nfc/campaign-page-resources?${params.toString()}`);
+    return api.get(`/taps/nfc/campaign-page-resources?${params.toString()}`);
   },
 
-  // GET /nfc/campaign-page-resource/:resourceId  ← FIXED to /nfc/
+  // GET /taps/nfc/campaign-page-resource/:resourceId  ← CORRECT
   getCampaignResource: (resourceId, { tapToken, ownerToken }) => {
     const params = new URLSearchParams({ tapToken, ownerToken });
-    return api.get(`/nfc/campaign-page-resource/${resourceId}?${params.toString()}`);
+    return api.get(`/taps/nfc/campaign-page-resource/${resourceId}?${params.toString()}`);
   },
 };
 

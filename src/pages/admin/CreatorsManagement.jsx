@@ -5,6 +5,7 @@ import {
   Plus, ArrowLeft, Trash2, Database, Users, X
 } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
+import ServerError from '../../components/ServerError'
 import { adminAPI } from '../../services/apiClient'
 import { useFormPersistence } from '../../hooks/useFormPersistence'
 
@@ -160,12 +161,7 @@ export default function CreatorsManagement() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-      </div>
-    )
+    return <ServerError onRetry={loadCreators} />
   }
 
   return (

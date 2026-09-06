@@ -9,6 +9,7 @@ import {
 import EmptyState from '../../components/EmptyState'
 import { tagsAPI, campaignAPI } from '../../services/apiClient'
 import { useFormPersistence } from '../../hooks/useFormPersistence'
+import ServerError from '../../components/ServerError'
 
 const PAGE_SIZE = 20
 
@@ -23,15 +24,13 @@ export default function AdminTags() {
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 }) 
   const [viewMode, setViewMode] = useState(() => {
     const saved = sessionStorage.getItem('admin_tags_view_mode')
-    return saved || 'list' // 'list' | 'generate'
+    return saved || 'list'
   })
 
-  // ✅ Persist viewMode to sessionStorage
   useEffect(() => {
     sessionStorage.setItem('admin_tags_view_mode', viewMode)
   }, [viewMode])
 
-  // ─── Pagination State ───
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
@@ -39,7 +38,6 @@ export default function AdminTags() {
   const [hasPreviousPage, setHasPreviousPage] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
-  // ─── Load Tags from API with Pagination ───
   const loadTags = async (page = 1) => {
     try {
       setLoading(true)
@@ -61,6 +59,16 @@ export default function AdminTags() {
       else if (Array.isArray(res)) list = res
       else if (res.tags && Array.isArray(res.tags)) list = res.tags
       else if (res.data?.data && Array.isArray(res.data.data)) list = res.data.data
+      
+      // Log each tag to see what data we have
+      list.forEach((tag, index) => {
+        console.log(`🏷️ Tag ${index + 1}:`, {
+          id: tag._id || tag.id,
+          type: tag.type || tag.productType || tag.category,
+          nfcLink: tag.nfcLink || tag.nfcUrl || tag.link,
+          fullObject: tag
+        })
+      })
       
       setTags(list)
       
@@ -115,8 +123,9 @@ export default function AdminTags() {
     return tag.nfcLink || tag.nfcUrl || tag.link || `https://merch.link/tag-${getTagId(tag)}`
   }
 
+  // ─── FIXED: Better type detection ───
   const getType = (tag) => {
-    return tag.type || tag.productType || tag.category || '—'
+    return tag.type || tag.productType || tag.category || tag.perkType || '—'
   }
 
   const getColor = (tag) => {
@@ -151,6 +160,7 @@ export default function AdminTags() {
     return tag.scans || tag.tapCount || tag.totalScans || 0
   }
 
+  // ─── FIXED: Improved filtering logic ───
   const filteredTags = tags.filter(tag => {
     const q = search.toLowerCase()
     const tagId = getTagId(tag).toLowerCase()
@@ -158,11 +168,20 @@ export default function AdminTags() {
     const sku = getSku(tag).toLowerCase()
     const type = getType(tag).toLowerCase()
     
-    const matchesSearch = tagId.includes(q) || nfcLink.includes(q) || sku.includes(q) || type.includes(q)
+    const matchesSearch = 
+      tagId.includes(q) || 
+      nfcLink.includes(q) || 
+      sku.includes(q) || 
+      type.includes(q) ||
+      getCampaign(tag).toLowerCase().includes(q)
 
     let matchesFilter = true
     if (activeFilter !== 'All') {
-      matchesFilter = type.includes(activeFilter.toLowerCase())
+      // Normalize both for comparison
+      const normalizedFilter = activeFilter.toLowerCase()
+      const normalizedType = type
+      matchesFilter = normalizedType === normalizedFilter || 
+                      normalizedType.includes(normalizedFilter)
     }
 
     return matchesSearch && matchesFilter
@@ -195,18 +214,8 @@ export default function AdminTags() {
     setOpenMenu(openMenu === id ? null : id)
   }
 
-  // ─── GENERATE TAG PAGE ───
-  if (viewMode === 'generate') {
-    return (
-      <GenerateTagPage
-        onBack={() => setViewMode('list')}
-        onSuccess={() => {
-          setViewMode('list')
-          loadTags(1)
-        }}
-      />
-    )
-  }
+  // ─── REMOVED: Generate tag page is no longer available ───
+  // We're removing the generate view mode
 
   if (loading) {
     return (
@@ -218,35 +227,22 @@ export default function AdminTags() {
   }
 
   if (error && tags.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-      </div>
-    )
+    return <ServerError onRetry={() => loadTags(currentPage)} />
   }
 
   return (
     <div className="space-y-6">
-      {/* ─── HEADER ─── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Tag Management</h1>
-          <p className="text-gray-500 text-sm mt-1">Generate and manage NFC smart tag links</p>
+          <p className="text-gray-500 text-sm mt-1">View and manage NFC smart tag links</p>
         </div>
-        <button
-          onClick={() => setViewMode('generate')}
-          className="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
-        >
-          <Plus size={16} />
-          Generate New Tag
-        </button>
+        {/* ─── REMOVED: Generate New Tag button ─── */}
       </div>
 
-      {/* ─── FILTER TABS + SEARCH ─── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full p-1">
-          {['All', 'T-Shirt', 'Cap', 'Hoodie'].map(filter => (
+          {['All', 'T-Shirt', 'Cap', 'Hoodie', 'Bag'].map(filter => (
             <button
               key={filter}
               onClick={() => setActiveFilter(filter)}
@@ -265,7 +261,7 @@ export default function AdminTags() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="Search"
+            placeholder="Search tags..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value)
@@ -276,12 +272,13 @@ export default function AdminTags() {
         </div>
       </div>
 
-      {/* ─── TABLE ─── */}
       {filteredTags.length === 0 ? (
         <EmptyState
           icon={<Tag size={40} className="text-gray-300" />}
           title="No tags found"
-          description="Try adjusting your search or generate a new tag."
+          description={search || activeFilter !== 'All' 
+            ? "Try adjusting your search or filter criteria." 
+            : "No NFC tags have been generated yet."}
         />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden relative">
@@ -306,6 +303,8 @@ export default function AdminTags() {
               <tbody className="divide-y divide-gray-100">
                 {filteredTags.map((tag) => {
                   const tagId = tag._id || tag.id
+                  const type = getType(tag)
+                  
                   return (
                     <tr key={tagId} className="hover:bg-gray-50/50">
                       <td className="py-4 px-4">
@@ -319,7 +318,17 @@ export default function AdminTags() {
                           <ExternalLink size={12} />
                         </a>
                       </td>
-                      <td className="py-4 px-4 text-gray-600">{getType(tag)}</td>
+                      <td className="py-4 px-4">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                          type === 'T-Shirt' ? 'bg-blue-50 text-blue-700' :
+                          type === 'Hoodie' ? 'bg-purple-50 text-purple-700' :
+                          type === 'Cap' ? 'bg-green-50 text-green-700' :
+                          type === 'Bag' ? 'bg-yellow-50 text-yellow-700' :
+                          'bg-gray-50 text-gray-700'
+                        }`}>
+                          {type}
+                        </span>
+                      </td>
                       <td className="py-4 px-4 text-gray-600">{getColor(tag)}</td>
                       <td className="py-4 px-4 text-gray-600">{getSize(tag)}</td>
                       <td className="py-4 px-4 text-gray-600 font-mono text-xs">{getSku(tag)}</td>
@@ -344,7 +353,6 @@ export default function AdminTags() {
             </table>
           </div>
 
-          {/* ─── PAGINATION CONTROLS ─── */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-50/50 border-t border-gray-100">
             <p className="text-xs text-gray-500">
               Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
@@ -374,7 +382,6 @@ export default function AdminTags() {
         </div>
       )}
 
-      {/* ─── DROPDOWN MENU ─── */}
       {openMenu && (
         <>
           <div className="fixed inset-0 z-[997]" onClick={() => setOpenMenu(null)} />
@@ -409,293 +416,6 @@ export default function AdminTags() {
           </div>
         </>
       )}
-    </div>
-  )
-}
-
-// ─── GENERATE TAG FULL PAGE (WITH FORM PERSISTENCE) ───
-function GenerateTagPage({ onBack, onSuccess }) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [success, setSuccess] = useState(false)
-  
-  // ✅ Use useFormPersistence for all form fields
-  const [formData, setFormData, clearSavedForm] = useFormPersistence("admin_generate_tag", {
-    productType: 'T-Shirt',
-    color: '',
-    size: '',
-    sku: '',
-    batchNumber: '',
-    campaign: '',
-    campaignId: '',
-    productId: '',
-    tagId: '',
-  })
-
-  const [campaigns, setCampaigns] = useState([])
-  const [loadingCampaigns, setLoadingCampaigns] = useState(true)
-
-  // Load campaigns for the dropdown
-  useEffect(() => {
-    async function loadCampaigns() {
-      try {
-        const res = await campaignAPI.getAll()
-        const list = Array.isArray(res.data) ? res.data : (res.data?.campaigns || [])
-        setCampaigns(list)
-      } catch (err) {
-        console.error('Failed to load campaigns:', err)
-      } finally {
-        setLoadingCampaigns(false)
-      }
-    }
-    loadCampaigns()
-  }, [])
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-    setSuccess(false)
-
-    try {
-      const payload = {
-        type: formData.productType,
-        color: formData.color,
-        size: formData.size,
-        sku: formData.sku,
-        batchNo: formData.batchNumber,
-        campaignId: formData.campaignId || formData.campaign,
-        productId: formData.productId,
-        tagId: formData.tagId,
-      }
-
-      console.log('📤 Generating tag with payload:', payload)
-
-      const response = await tagsAPI.create(payload)
-      console.log('✅ Tag generated:', response)
-
-      setSuccess(true)
-      // ✅ Clear saved form after successful generation
-      clearSavedForm()
-      
-      setTimeout(() => {
-        onSuccess()
-      }, 1500)
-    } catch (err) {
-      console.error('❌ Error generating tag:', err)
-      setError(err.message || 'Failed to generate tag')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleBack = () => {
-    // ✅ Clear saved form when navigating back
-    clearSavedForm()
-    onBack()
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Generate NFC Tag Link</h1>
-          <p className="text-gray-500 text-sm mt-1">Generate and manage NFC smart tag links</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-        </div>
-      </div>
-
-      {/* Form */}
-      <div className="bg-white rounded-xl border border-gray-200 p-8 max-w-2xl">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {success && (
-            <div className="bg-green-50 text-green-600 text-sm p-3 rounded-xl flex items-start gap-2">
-              <CheckCircle size={18} className="shrink-0 mt-0.5" />
-              <span>Tag generated successfully! Redirecting...</span>
-            </div>
-          )}
-          {error && (
-            <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
-              <AlertCircle size={18} className="shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Product Type */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Product Type</label>
-            <select
-              value={formData.productType}
-              onChange={(e) => setFormData({...formData, productType: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-            >
-              <option>T-Shirt</option>
-              <option>Cap</option>
-              <option>Hoodie</option>
-              <option>Bag</option>
-            </select>
-          </div>
-
-          {/* Color + Size */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Color</label>
-              <input
-                type="text"
-                placeholder="Input color"
-                value={formData.color}
-                onChange={(e) => setFormData({...formData, color: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Size</label>
-              <input
-                type="text"
-                placeholder="Input size"
-                value={formData.size}
-                onChange={(e) => setFormData({...formData, size: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* SKU + Batch */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">SKU</label>
-              <input
-                type="text"
-                placeholder="SKU-00421"
-                value={formData.sku}
-                onChange={(e) => setFormData({...formData, sku: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Batch Number</label>
-              <input
-                type="text"
-                placeholder="BATCH-2025-07"
-                value={formData.batchNumber}
-                onChange={(e) => setFormData({...formData, batchNumber: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Campaign + Campaign ID */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Assign Campaign</label>
-              <select
-                value={formData.campaign}
-                onChange={(e) => {
-                  const selectedCamp = campaigns.find(c => (c._id || c.id) === e.target.value)
-                  setFormData({
-                    ...formData, 
-                    campaign: e.target.value,
-                    campaignId: selectedCamp?._id || e.target.value
-                  })
-                }}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              >
-                <option value="">Select a campaign</option>
-                {campaigns.map(c => (
-                  <option key={c._id || c.id} value={c._id || c.id}>
-                    {c.campaignName || c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Campaign ID</label>
-              <input
-                type="text"
-                placeholder="Input Campaign ID"
-                value={formData.campaignId}
-                onChange={(e) => setFormData({...formData, campaignId: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Product ID + Tag ID */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Product ID</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="PROD-8841"
-                  value={formData.productId}
-                  onChange={(e) => setFormData({...formData, productId: e.target.value})}
-                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-                />
-                <button 
-                  type="button"
-                  className="px-4 py-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg text-xs font-semibold transition-colors"
-                >
-                  Generate
-                </button>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Tag ID</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="NFC000128"
-                  value={formData.tagId}
-                  onChange={(e) => setFormData({...formData, tagId: e.target.value})}
-                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
-                />
-                <button 
-                  type="button"
-                  className="px-4 py-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg text-xs font-semibold transition-colors"
-                >
-                  Generate
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Submit */}
-          <div className="flex justify-center pt-4">
-            <button
-              type="submit"
-              disabled={loading || success}
-              className="bg-yellow-500 hover:bg-yellow-600 text-white px-8 py-3 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={16} className="animate-spin inline mr-2" />
-                  Generating...
-                </>
-              ) : success ? (
-                <>
-                  <CheckCircle size={16} className="inline mr-2" />
-                  Generated!
-                </>
-              ) : (
-                <>
-                  <Plus size={16} className="inline mr-2" />
-                  Add Tag
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   )
 }

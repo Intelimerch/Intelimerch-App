@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { campaignAPI } from '../../services/apiClient'
+import ServerError from '../../components/ServerError'
 
 const PAGE_SIZE = 20
 
@@ -18,7 +19,6 @@ export default function Campaigns() {
   const [editingCampaign, setEditingCampaign] = useState(null)
   const [editForm, setEditForm] = useState({})
 
-  // ─── Pagination State ───
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
@@ -28,21 +28,14 @@ export default function Campaigns() {
 
   const filters = ['All', 'Active', 'Paused', 'Draft']
 
-  // ─── Fetch Campaigns from API with Pagination ───
   const fetchCampaigns = async (page = 1) => {
     try {
       setLoading(true)
       setError(null)
-      
-      // ✅ Fetch only the current page from backend
       const response = await campaignAPI.getAll(page, PAGE_SIZE)
       console.log('📦 Campaigns fetched:', response)
-      
-      // Backend returns: { data: [...], pagination: { total, page, limit, totalPages, hasNextPage, hasPreviousPage } }
       const list = Array.isArray(response.data) ? response.data : (response.data?.campaigns || [])
       setCampaigns(list)
-      
-      // ✅ Update pagination state from backend response
       const pagination = response.pagination || {}
       setCurrentPage(pagination.page || 1)
       setTotalPages(pagination.totalPages || 1)
@@ -62,14 +55,12 @@ export default function Campaigns() {
     fetchCampaigns(1)
   }, [])
 
-  // ─── Filter & Search (Client-side for current page only) ───
   const filtered = campaigns.filter(c => {
     const matchesFilter = filter === 'All' || c.status?.toLowerCase() === filter.toLowerCase()
     const matchesSearch = (c.campaignName || c.name || '').toLowerCase().includes(search.toLowerCase())
     return matchesFilter && matchesSearch
   })
 
-  // ─── Handle Page Change ───
   const handlePageChange = (newPage) => {
     if (newPage < 1 || newPage > totalPages) return
     setCurrentPage(newPage)
@@ -77,19 +68,15 @@ export default function Campaigns() {
     setOpenMenu(null)
   }
 
-  // ─── Reset to Page 1 on Filter/Search Change ───
   useEffect(() => {
     fetchCampaigns(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter])
 
-  // ─── Delete Campaign ───
   const handleDelete = async (campaignId) => {
     if (!confirm('Are you sure you want to delete this campaign?')) return
-
     try {
       await campaignAPI.delete(campaignId)
-      // Refresh current page
       fetchCampaigns(currentPage)
       setOpenMenu(null)
     } catch (err) {
@@ -98,7 +85,6 @@ export default function Campaigns() {
     }
   }
 
-  // ─── Edit Campaign ───
   const openEdit = (c) => {
     setEditForm({
       name: c.campaignName || c.name,
@@ -118,7 +104,6 @@ export default function Campaigns() {
         startDate: editForm.startDate,
         endDate: editForm.endDate,
       })
-      // Refresh current page after update
       fetchCampaigns(currentPage)
       setEditingCampaign(null)
     } catch (err) {
@@ -127,7 +112,6 @@ export default function Campaigns() {
     }
   }
 
-  // ─── Loading State ───
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -137,16 +121,8 @@ export default function Campaigns() {
     )
   }
 
-  // ─── Error State ───
   if (error && campaigns.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-red-500 mb-4">{error}</p>
-        <button onClick={() => fetchCampaigns(currentPage)} className="btn-primary">
-          Retry
-        </button>
-      </div>
-    )
+    return <ServerError onRetry={() => fetchCampaigns(currentPage)} />
   }
 
   return (
@@ -170,7 +146,6 @@ export default function Campaigns() {
               value={search}
               onChange={e => {
                 setSearch(e.target.value)
-                // Reset to page 1 on search
                 if (currentPage !== 1) fetchCampaigns(1)
               }}
               className="input-field pl-9"
@@ -267,38 +242,34 @@ export default function Campaigns() {
               </table>
             </div>
 
-            {/* ─── Pagination Controls (ALWAYS Visible) ─── */}
-<div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-100">
-  <p className="text-xs text-gray-500">
-    Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
-    <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> of{' '}
-    <span className="font-medium">{totalItems}</span> fans
-  </p>
-  <div className="flex items-center gap-2">
-    <button
-      onClick={() => handlePageChange(currentPage - 1)}
-      disabled={!hasPreviousPage}
-      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-    >
-      Previous
-    </button>
-    <span className="text-sm font-medium text-gray-700 px-2">
-      Page {currentPage} of {totalPages}
-    </span>
-    <button
-      onClick={() => handlePageChange(currentPage + 1)}
-      disabled={!hasNextPage}
-      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-    >
-      Next
-    </button>
-  </div>
-</div>
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-100">
+              <p className="text-xs text-gray-500">
+                Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
+                <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> of{' '}
+                <span className="font-medium">{totalItems}</span> campaigns
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={!hasPreviousPage}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  Previous
+                </button>
+                <span className="text-sm font-medium text-gray-700 px-2">Page {currentPage} of {totalPages}</span>
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={!hasNextPage}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>
 
-      {/* Edit Campaign Modal */}
       {editingCampaign && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditingCampaign(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>

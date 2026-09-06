@@ -1,3 +1,4 @@
+// src/pages/dashboard/Overview.jsx
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -10,6 +11,7 @@ import {
 } from 'recharts'
 import { analyticsAPI } from '../../services/apiClient'
 import { useAuth } from '../../context/AuthContext'
+import ServerError from '../../components/ServerError'
 
 const PIE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EF4444']
 
@@ -45,20 +47,23 @@ export default function Overview() {
   const repeatScans = analytics?.repeatScans?.count ?? 0
   const conversionRate = analytics?.conversionRate?.count ?? 0
 
-  // Real field, no fabricated fallback rows — if empty, the table just
-  // shows an empty state instead of pretend campaigns.
   const campaignPerformance = Array.isArray(analytics?.campaignPerformance)
     ? analytics.campaignPerformance
     : []
 
   const scanTimeline = analytics?.scanTimeline?.[0] || analytics?.scanTimeline || {}
   const timelineData = scanTimeline[timeRange.replace(' ', '')] || []
-  // No fake data fallback — an empty chart honestly reflects that the
-  // backend hasn't recorded any scans in this range yet.
-  const chartData = timelineData
+  
+  const chartData = timelineData.length > 0 ? timelineData : [
+    { day: 'Mon', scans: 0 },
+    { day: 'Tue', scans: 0 },
+    { day: 'Wed', scans: 0 },
+    { day: 'Thu', scans: 0 },
+    { day: 'Fri', scans: 0 },
+    { day: 'Sat', scans: 0 },
+    { day: 'Sun', scans: 0 },
+  ]
 
-  // Backend doesn't return topLocations at all yet — no fallback data,
-  // just an honest "not available" state instead of invented countries.
   const topLocations = Array.isArray(analytics?.topLocations) ? analytics.topLocations : []
   const totalLocationScans = topLocations.reduce((sum, l) => sum + (l.value || 0), 0)
 
@@ -72,15 +77,7 @@ export default function Overview() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-        <button onClick={() => window.location.reload()} className="btn-primary w-auto px-6 mt-3">
-          Retry
-        </button>
-      </div>
-    )
+    return <ServerError onRetry={fetchAnalytics} />
   }
 
   return (
@@ -150,10 +147,11 @@ export default function Overview() {
             </div>
           </div>
 
-          {chartData.length === 0 ? (
+          {timelineData.length === 0 ? (
             <div className="h-[220px] flex flex-col items-center justify-center text-gray-400">
               <Activity size={28} className="mb-2 text-gray-300" />
               <p className="text-sm">No scan data yet for this range</p>
+              <p className="text-xs text-gray-300 mt-1">Once you start tapping, your data will appear here</p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
@@ -179,6 +177,7 @@ export default function Overview() {
             <div className="h-48 flex flex-col items-center justify-center text-gray-400">
               <Activity size={28} className="mb-2 text-gray-300" />
               <p className="text-sm text-center">No location data available yet</p>
+              <p className="text-xs text-gray-300 mt-1">Location data appears after taps</p>
             </div>
           ) : (
             <div className="flex flex-col items-center">
@@ -230,6 +229,7 @@ export default function Overview() {
           <div className="py-10 flex flex-col items-center justify-center text-gray-400">
             <Activity size={28} className="mb-2 text-gray-300" />
             <p className="text-sm">No campaigns yet</p>
+            <p className="text-xs text-gray-300 mt-1">Create your first campaign to see performance data</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

@@ -12,23 +12,22 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 import { analyticsAPI } from '../../services/apiClient'
+import ServerError from '../../components/ServerError'
 
 const COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EC4899', '#F59E0B']
 
 export default function AdminOverview() {
   const navigate = useNavigate()
-  const { user } = useAuth() // ✅ Get real user name
+  const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [analytics, setAnalytics] = useState(null)
   const [timeRange, setTimeRange] = useState('7 Days')
 
-  // Get user's name for the header
   const adminName = user?.firstName 
     ? `${user.firstName} ${user.lastName || ''}`
     : user?.name || 'Admin'
 
-  // ─── Load Analytics ───
   const fetchAnalytics = async () => {
     try {
       setLoading(true)
@@ -37,7 +36,6 @@ export default function AdminOverview() {
       const res = await analyticsAPI.getDashboardAnalytics()
       console.log('📊 Admin Analytics fetched:', res)
       
-      // Handle the response structure
       let data
       if (res.analyticsData) {
         data = res.analyticsData
@@ -62,23 +60,18 @@ export default function AdminOverview() {
 
   const handleRefresh = () => fetchAnalytics()
 
-  // ─── Extract data from response ───
   const totalNFCScans = analytics?.totalNFCScans?.count ?? 0
   const uniqueActivations = analytics?.uniqueActivations?.count ?? 0
   const repeatScans = analytics?.repeatScans?.count ?? 0
   const conversionRate = analytics?.conversionRate?.count ?? 0
 
-  // ─── Scan Timeline ───
   const scanTimeline = analytics?.scanTimeline?.[0] || {}
   const timelineData = scanTimeline[timeRange.replace(' ', '')] || scanTimeline['7Days'] || scanTimeline['30Days'] || []
 
-  // ─── Campaign Performance ───
   const campaignPerformance = analytics?.campaignPerformance || []
 
-  // ─── Top Locations ───
   const topLocations = analytics?.topLocations || []
 
-  // ─── Prepare chart data ───
   const chartData = timelineData.length > 0 
     ? timelineData 
     : [
@@ -93,12 +86,7 @@ export default function AdminOverview() {
 
   const locationData = topLocations.length > 0 
     ? topLocations.map(loc => ({ name: loc.name || loc.location, value: loc.value || loc.scans || 0 }))
-    : [
-        { name: 'Lagos', value: 4800 },
-        { name: 'Abuja', value: 1820 },
-        { name: 'Calabar', value: 980 },
-        { name: 'PH', value: 741 },
-      ]
+    : []
 
   if (loading) {
     return (
@@ -110,15 +98,7 @@ export default function AdminOverview() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 text-center max-w-md">{error}</p>
-        <button onClick={handleRefresh} className="btn-primary w-auto px-6 mt-3">
-          Retry
-        </button>
-      </div>
-    )
+    return <ServerError onRetry={fetchAnalytics} />
   }
 
   return (
@@ -138,7 +118,7 @@ export default function AdminOverview() {
         </div>
       </div>
 
-      {/* ─── STATS CARDS (Matches Figma Exactly) ─── */}
+      {/* ─── STATS CARDS ─── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total NFC Scans"
@@ -206,34 +186,42 @@ export default function AdminOverview() {
         {/* Top Locations */}
         <div className="card">
           <h3 className="font-semibold text-gray-800 mb-4">Top Locations</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <RePieChart>
-              <Pie
-                data={locationData}
-                cx="50%"
-                cy="50%"
-                innerRadius={40}
-                outerRadius={65}
-                dataKey="value"
-              >
-                {locationData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+          {locationData.length === 0 ? (
+            <div className="flex items-center justify-center h-[200px] text-gray-400 text-sm">
+              No location data available
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <RePieChart>
+                  <Pie
+                    data={locationData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={40}
+                    outerRadius={65}
+                    dataKey="value"
+                  >
+                    {locationData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+                </RePieChart>
+              </ResponsiveContainer>
+              <div className="mt-3 space-y-1">
+                {locationData.map((loc, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
+                      <span className="text-gray-600">{loc.name}</span>
+                    </div>
+                    <span className="font-medium">{loc.value.toLocaleString()}</span>
+                  </div>
                 ))}
-              </Pie>
-              <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
-            </RePieChart>
-          </ResponsiveContainer>
-          <div className="mt-3 space-y-1">
-            {locationData.map((loc, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
-                  <span className="text-gray-600">{loc.name}</span>
-                </div>
-                <span className="font-medium">{loc.value.toLocaleString()}</span>
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -299,7 +287,6 @@ export default function AdminOverview() {
   )
 }
 
-// ─── Stat Card Component (Matches Figma EXACTLY) ───
 function StatCard({ label, value, change, icon, bg }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-5">

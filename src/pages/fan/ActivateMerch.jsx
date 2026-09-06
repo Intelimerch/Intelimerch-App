@@ -1,3 +1,4 @@
+// src/pages/fan/ActivateMerch.jsx
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, AlertCircle, CheckCircle, Nfc } from "lucide-react";
@@ -39,6 +40,15 @@ function validateActivation(data) {
 
 function parseErrorMessage(error) {
   const message = error?.message || "";
+  if (message.includes("Tag not found")) {
+    return "We couldn't find this tag. Please tap your merch again to get a valid token.";
+  }
+  if (
+    message.includes("Cannot read properties of null") ||
+    message.includes("Tag not found")
+  ) {
+    return "We couldn't find this tag. Please tap your merch again to get a valid token.";
+  }
   if (
     message.includes("already been activated") ||
     message.includes("activated tag")
@@ -103,11 +113,18 @@ export default function ActivateMerch() {
       return;
     }
 
+    // ✅ Check if tapToken exists before submitting
+    if (!tapToken) {
+      setApiError(
+        "Your session has expired. Please tap your merch again to start.",
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      // ✅ Get full device info (IP, latitude, longitude, accuracy)
       const deviceInfo = await getDeviceInfo();
-      console.log('📍 Device info:', deviceInfo);
+      console.log("📍 Device info:", deviceInfo);
 
       const response = await tapAPI.activate({
         tapToken,
@@ -116,26 +133,24 @@ export default function ActivateMerch() {
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
         consentGiven: true,
+
         deviceType: /iPhone|iPad|iPod/i.test(navigator.userAgent)
           ? "ios"
           : /Mobi|Android/i.test(navigator.userAgent)
             ? "android"
             : "web",
 
-        // ✅ ENABLED: Send full location (IP, lat, long, accuracy)
-        location: deviceInfo.latitude
-          ? { latitude: deviceInfo.latitude, longitude: deviceInfo.longitude }
-          : undefined,
-        ip: deviceInfo.ip || undefined,
-        latitude: deviceInfo.latitude || undefined,
-        longitude: deviceInfo.longitude || undefined,
-        accuracy: deviceInfo.accuracy || undefined,
+        location: {
+          country: deviceInfo.country || "Unknown",
+          state: deviceInfo.state || "Unknown",
+          city: deviceInfo.city || "Unknown",
+        },
       });
 
-      console.log('activate response:', JSON.stringify(response))
+      console.log("activate response:", JSON.stringify(response));
 
       const newTapToken = readTapToken(response);
-      
+
       if (newTapToken) {
         setTapToken(newTapToken);
         setOwnerToken(newTapToken); // temp: use tapToken until backend returns ownerToken
@@ -147,21 +162,27 @@ export default function ActivateMerch() {
       setTimeout(() => {
         navigate("/fan/activated", { replace: true, state: { tagId } });
       }, 1000);
-    } catch (err) {
-      console.error("❌ Error activating merch:", err);
+    } 
+    catch (err) {
+  console.error("❌ Error activating merch:", err);
 
-      if (
-        err?.message?.includes("already been activated") ||
-        err?.message?.includes("activated tag")
-      ) {
-        navigate("/fan/claimed", { replace: true, state: { tagId } });
-        return;
-      }
+  if (err?.message?.includes("Tag not found") || err?.message?.includes("Cannot read properties of null")) {
+    // ✅ Clear the stale tapToken
+    sessionStorage.removeItem("tapToken");
+    localStorage.removeItem("ownerToken");
+    
+    setApiError("We couldn't find this tag. Please tap your merch again to get a valid token.");
+    setLoading(false);
+    return;
+  }
 
-      setApiError(parseErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+  if (err?.message?.includes("already been activated") || err?.message?.includes("activated tag")) {
+    navigate("/fan/claimed", { replace: true, state: { tagId } });
+    return;
+  }
+
+  setApiError(parseErrorMessage(err));
+}
   };
 
   const renderError = (field) =>
@@ -259,8 +280,6 @@ export default function ActivateMerch() {
           />
           {renderError("phone")}
         </div>
-
-        {/* Location is now sent automatically via getDeviceInfo() */}
 
         <div>
           <label className="flex items-start gap-3 cursor-pointer">
