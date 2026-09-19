@@ -1,196 +1,177 @@
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Video, ChevronDown, Check, Loader2, AlertCircle } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { perksAPI, campaignAPI } from '../../services/apiClient'
+// src/pages/dashboard/UploadPerk.jsx
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  Upload,
+  Video,
+  ChevronDown,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { perksAPI } from "../../services/apiClient";
+import { useFormPersistence } from "../../hooks/useFormPersistence";
 
-// Backend enum — must match exactly, lowercase (confirmed via Swagger schema)
 const contentTypes = [
-  { label: 'Video', value: 'video' },
-  { label: 'Image', value: 'image' },
-  { label: 'Link', value: 'link' },
-  { label: 'Document', value: 'document' },
-]
+  { label: "Video", value: "video" },
+  { label: "Image", value: "image" },
+  { label: "Link", value: "link" },
+  { label: "Document", value: "document" },
+];
 
-// ─── Professional Error Parser ──────────────────────────
+// GET /admin/perks/categories is intermittently flaky on the backend
+// (confirmed via curl — same failure outside the browser entirely, not a
+// frontend bug). These are real, confirmed category IDs to fall back to
+// so the form stays usable when the live fetch fails. Shown with a
+// shortened ID since two entries share the same name ("Premium Access").
+const KNOWN_CATEGORIES = [
+  { _id: "6a47f7bd57683e966000296e", name: "Classic Access" },
+  { _id: "6a47dff4b09ae7642a078972", name: "Premium Access" },
+  { _id: "6a494f1aa4164eab48bf52aa", name: "Premium Access" },
+];
+
 function parseErrorMessage(error) {
-  const message = error?.message || '';
-  
-  if (message.includes('E11000') || message.includes('duplicate key')) {
-    return 'A perk with this name already exists. Please use a different name.';
+  const message = error?.message || "";
+  if (message.includes("E11000") || message.includes("duplicate key")) {
+    return "A perk with this name already exists. Please use a different name.";
   }
-  if (message.includes('validation') || message.includes('valid')) {
-    if (message.includes('perkCategoryId')) {
-      return 'Please select a valid perk category.';
-    }
-    if (message.includes('contentType')) {
-      return 'Please select a valid content type.';
-    }
-    return 'Please check your input and try again.';
+  if (message.includes("perkCategoryId"))
+    return "Please select a valid perk category.";
+  if (message.includes("contentType"))
+    return "Please select a valid content type.";
+  if (message.includes("required")) {
+    if (message.includes("perkName")) return "Perk name is required.";
+    return "Please fill in all required fields.";
   }
-  if (message.includes('required')) {
-    if (message.includes('perkName')) return 'Perk name is required.';
-    if (message.includes('perkCategoryId')) return 'Please select a perk category.';
-    if (message.includes('contentType')) return 'Please select a content type.';
-    return 'Please fill in all required fields.';
-  }
-  if (message.includes('401') || message.includes('Unauthorized')) {
-    return 'Your session has expired. Please log in again.';
-  }
-  if (message.includes('403') || message.includes('Forbidden')) {
-    return 'You don\'t have permission to create perks.';
-  }
-  if (message.includes('500') || message.includes('Internal Server Error')) {
-    return 'Something went wrong on our server. Please try again later.';
-  }
-  if (message.includes('ECONNREFUSED') || message.includes('NetworkError')) {
-    return 'Cannot connect to the server. Please check your internet connection.';
-  }
-  return message || 'An unexpected error occurred. Please try again.';
+  if (message.includes("401"))
+    return "Your session has expired. Please log in again.";
+  if (message.includes("403"))
+    return "You don't have permission to create perks.";
+  if (message.includes("500"))
+    return "Something went wrong on our server. Please try again later.";
+  return message || "An unexpected error occurred. Please try again.";
 }
 
 export default function UploadPerk() {
-  const navigate = useNavigate()
-  const [showTypeDrop, setShowTypeDrop] = useState(false)
-  const [showCampDrop, setShowCampDrop] = useState(false)
-  const [showCatDrop, setShowCatDrop] = useState(false)
+  const navigate = useNavigate();
+  const [showTypeDrop, setShowTypeDrop] = useState(false);
+  const [showCatDrop, setShowCatDrop] = useState(false);
 
-  const [perkName, setPerkName] = useState('')
-  const [selectedType, setSelectedType] = useState(null)
-  const [selectedCampaign, setSelectedCampaign] = useState(null)
-  const [description, setDescription] = useState('')
-  const [dragging, setDragging] = useState(false)
-  const [fileName, setFileName] = useState('')
-  const [file, setFile] = useState(null)
+  // ✅ Use useFormPersistence for all form fields
+  const [formData, setFormData, clearSavedForm] = useFormPersistence(
+    "artist_upload_perk",
+    {
+      perkName: "",
+      selectedType: null,
+      selectedCategory: null,
+      description: "",
+      fileName: "",
+      file: null,
+    },
+  );
 
-  // ─── Categories ───
-  const [categories, setCategories] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState(null)
-  const [loadingCategories, setLoadingCategories] = useState(true)
-  const [categoriesError, setCategoriesError] = useState('')
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [categoriesError, setCategoriesError] = useState("");
+  const [dragging, setDragging] = useState(false);
 
-  // ─── Campaigns ───
-  const [campaigns, setCampaigns] = useState([])
-  const [loadingCampaigns, setLoadingCampaigns] = useState(true)
-  const [campaignsError, setCampaignsError] = useState('')
+  const [submitting, setSubmitting] = useState(false);
+  const [uiError, setUiError] = useState(null);
+  const [fieldError, setFieldError] = useState("");
 
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-  const [uiError, setUiError] = useState(null)
-
-  // ─── Load Categories ───
   useEffect(() => {
     async function loadCategories() {
       try {
-        const res = await perksAPI.getCategories()
-        console.log('📦 Categories loaded:', res)
-        setCategories(res.data || [])
+        const res = await perksAPI.getCategories();
+        const live = res.data || [];
+        setCategories(live.length > 0 ? live : KNOWN_CATEGORIES);
       } catch (err) {
-        console.error('Failed to load perk categories:', err)
-        setCategoriesError('Could not load categories. Please refresh.')
+        console.error(
+          "Failed to load perk categories, using known fallback:",
+          err,
+        );
+        setCategories(KNOWN_CATEGORIES);
       } finally {
-        setLoadingCategories(false)
+        setLoadingCategories(false);
       }
     }
-    loadCategories()
-  }, [])
+    loadCategories();
+  }, []);
 
-  // ─── Load Campaigns ───
-  useEffect(() => {
-    async function loadCampaigns() {
-      try {
-        setLoadingCampaigns(true)
-        const res = await campaignAPI.getAll()
-        console.log('📦 Campaigns loaded:', res)
-        const list = Array.isArray(res.data) ? res.data : (res.data?.campaigns || [])
-        setCampaigns(list)
-      } catch (err) {
-        console.error('Failed to load campaigns:', err)
-        setCampaignsError('Could not load campaigns. Please refresh.')
-      } finally {
-        setLoadingCampaigns(false)
-      }
-    }
-    loadCampaigns()
-  }, [])
-
-  const handleFile = (file) => {
-    if (!file) return
-    setFileName(file.name)
-    setFile(file)
-  }
+  const handleFile = (f) => {
+    if (!f) return;
+    setFormData((prev) => ({ ...prev, fileName: f.name, file: f }));
+  };
 
   const handleDrop = (e) => {
-    e.preventDefault()
-    setDragging(false)
-    const file = e.dataTransfer.files?.[0]
-    handleFile(file)
-  }
-
-  const handleFileInput = (e) => {
-    const file = e.target.files?.[0]
-    handleFile(file)
-  }
+    e.preventDefault();
+    setDragging(false);
+    handleFile(e.dataTransfer.files?.[0]);
+  };
 
   const handleSubmit = async () => {
-    setError('')
-    setUiError(null)
+    setFieldError("");
+    setUiError(null);
 
-    if (!perkName.trim()) {
-      setError('Perk name is required')
-      return
+    if (!formData.perkName.trim()) {
+      setFieldError("Perk name is required");
+      return;
     }
-    if (!selectedCategory) {
-      setError('Please choose a perk category')
-      return
+    if (!formData.selectedCategory) {
+      setFieldError("Please choose a perk category");
+      return;
     }
-    if (!selectedType) {
-      setError('Please choose a content type')
-      return
+    if (!formData.selectedType) {
+      setFieldError("Please choose a content type");
+      return;
     }
 
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      const formData = new FormData()
-      formData.append('perkName', perkName.trim())
-      formData.append('perkCategoryId', selectedCategory._id)
-      formData.append('contentType', selectedType.value)
-      
-      if (description.trim()) {
-        formData.append('description', description.trim())
-      }
-      
-      if (selectedCampaign) {
-        const campaignId = selectedCampaign._id || selectedCampaign.id
-        formData.append('campaignId', campaignId)
-      }
-      
-      // If there's a file, append it (backend supports file upload)
-      if (file) {
-        formData.append('file', file)
-      }
+      const payload = {
+        perkName: formData.perkName.trim(),
+        perkCategoryId: formData.selectedCategory._id,
+        contentType: formData.selectedType.value,
+        // POST /perks only accepts JSON with a fileUrl string — confirmed
+        // in Swagger (no multipart option here, unlike PATCH). No real
+        // upload endpoint exists yet, so this is a placeholder.
+        fileUrl: formData.file
+          ? `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(formData.file.name)}`
+          : "https://placeholder.intelimerch.com/pending-upload/none",
+      };
+      if (formData.description.trim())
+        payload.description = formData.description.trim();
 
-      const response = await perksAPI.create(formData)
-      console.log('✅ Perk created:', response)
-      
-      navigate('/dashboard/perks')
+      const response = await perksAPI.create(payload);
+      console.log("✅ Perk created:", response);
+      clearSavedForm(); // ✅ Clear saved form after success
+      navigate("/dashboard/perks");
     } catch (err) {
-      console.error('Failed to create perk:', err)
-      const friendlyMessage = parseErrorMessage(err)
-      setUiError(friendlyMessage)
-      setError(friendlyMessage)
+      console.error("Failed to create perk:", err);
+      setUiError(parseErrorMessage(err));
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
+
+  const handleBack = () => {
+    clearSavedForm(); // ✅ Clear when navigating away
+    navigate("/dashboard/perks");
+  };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Upload Perk</h1>
-          <p className="text-gray-500 text-sm">Upload a new perk for your fans</p>
+          <p className="text-gray-500 text-sm">
+            Upload a new perk for your fans
+          </p>
         </div>
-        <button onClick={() => navigate('/dashboard/perks')} className="btn-outline w-auto px-5 text-sm">
+        <button
+          onClick={handleBack}
+          className="btn-outline w-auto px-5 text-sm"
+        >
           <ArrowLeft size={15} /> Back
         </button>
       </div>
@@ -198,30 +179,19 @@ export default function UploadPerk() {
       <div className="card max-w-4xl">
         <h2 className="text-lg font-bold text-gray-900 mb-5">Perk Details</h2>
 
-        {/* ─── UI Error Display ─── */}
         {uiError && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3">
             <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
-            <div className="flex-1">
-              <p className="text-sm font-medium">{uiError}</p>
-              <button 
-                onClick={() => setUiError(null)}
-                className="text-xs text-red-600 hover:text-red-800 mt-1 font-medium"
-              >
-                Dismiss
-              </button>
-            </div>
+            <p className="text-sm font-medium">{uiError}</p>
           </div>
         )}
-
-        {error && !uiError && (
+        {fieldError && !uiError && (
           <div className="bg-red-50 text-red-600 text-sm p-3 rounded-xl mb-4">
-            {error}
+            {fieldError}
           </div>
         )}
 
         <div className="space-y-5">
-          {/* ─── Perk Name ─── */}
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">
               Perk Name <span className="text-red-500">*</span>
@@ -229,58 +199,77 @@ export default function UploadPerk() {
             <input
               className="input-field"
               placeholder="e.g. Exclusive Behind the Scenes Video"
-              value={perkName}
-              onChange={(e) => setPerkName(e.target.value)}
+              value={formData.perkName}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, perkName: e.target.value }))
+              }
               disabled={submitting}
             />
           </div>
 
-          {/* ─── Perk Category ─── */}
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">
               Perk Category <span className="text-red-500">*</span>
             </label>
-            {categoriesError ? (
-              <p className="text-xs text-red-500">{categoriesError}</p>
-            ) : (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => { setShowCatDrop(!showCatDrop); setShowTypeDrop(false); setShowCampDrop(false) }}
-                  className="input-field text-left flex items-center justify-between"
-                  disabled={loadingCategories || submitting}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCatDrop(!showCatDrop);
+                  setShowTypeDrop(false);
+                }}
+                className="input-field text-left flex items-center justify-between"
+                disabled={submitting || loadingCategories}
+              >
+                <span
+                  className={
+                    formData.selectedCategory
+                      ? "text-gray-800"
+                      : "text-gray-400"
+                  }
                 >
-                  <span className={selectedCategory ? 'text-gray-800' : 'text-gray-400'}>
-                    {loadingCategories
-                      ? 'Loading categories...'
-                      : selectedCategory?.name || 'Choose a perk category'}
-                  </span>
-                  <ChevronDown size={15} className="text-gray-400 shrink-0" />
-                </button>
-                {showCatDrop && (
-                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
-                    {categories.length === 0 ? (
-                      <p className="px-4 py-2.5 text-sm text-gray-400">No categories found</p>
-                    ) : (
-                      categories.map((cat) => (
-                        <button
-                          key={cat._id}
-                          type="button"
-                          onClick={() => { setSelectedCategory(cat); setShowCatDrop(false) }}
-                          className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                        >
-                          <div className={`w-4 h-4 border-2 rounded-full shrink-0 ${selectedCategory?._id === cat._id ? 'bg-primary border-primary' : 'border-gray-300'}`} />
-                          {cat.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                  {loadingCategories
+                    ? "Loading categories..."
+                    : formData.selectedCategory?.name ||
+                      "Choose a perk category"}
+                </span>
+                <ChevronDown size={15} className="text-gray-400 shrink-0" />
+              </button>
+              {showCatDrop && (
+                <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
+                  {categories.length === 0 ? (
+                    <p className="px-4 py-2.5 text-sm text-gray-400">
+                      No categories found
+                    </p>
+                  ) : (
+                    categories.map((cat) => (
+                      <button
+                        key={cat._id}
+                        type="button"
+                        onClick={() => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            selectedCategory: cat,
+                          }));
+                          setShowCatDrop(false);
+                        }}
+                        className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                      >
+                        <div
+                          className={`w-4 h-4 border-2 rounded-full shrink-0 ${formData.selectedCategory?._id === cat._id ? "bg-primary border-primary" : "border-gray-300"}`}
+                        />
+                        {cat.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            {categoriesError && (
+              <p className="text-xs text-red-500 mt-1">{categoriesError}</p>
             )}
           </div>
 
-          {/* ─── Content Type ─── */}
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">
               Content Type <span className="text-red-500">*</span>
@@ -288,25 +277,38 @@ export default function UploadPerk() {
             <div className="relative">
               <button
                 type="button"
-                onClick={() => { setShowTypeDrop(!showTypeDrop); setShowCatDrop(false); setShowCampDrop(false) }}
+                onClick={() => {
+                  setShowTypeDrop(!showTypeDrop);
+                  setShowCatDrop(false);
+                }}
                 className="input-field text-left flex items-center justify-between"
                 disabled={submitting}
               >
-                <span className={selectedType ? 'text-gray-800' : 'text-gray-400'}>
-                  {selectedType?.label || 'Choose what kind of exclusive content this perk delivers'}
+                <span
+                  className={
+                    formData.selectedType ? "text-gray-800" : "text-gray-400"
+                  }
+                >
+                  {formData.selectedType?.label ||
+                    "Choose what kind of exclusive content this perk delivers"}
                 </span>
                 <ChevronDown size={15} className="text-gray-400 shrink-0" />
               </button>
               {showTypeDrop && (
                 <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1">
-                  {contentTypes.map(t => (
+                  {contentTypes.map((t) => (
                     <button
                       key={t.value}
                       type="button"
-                      onClick={() => { setSelectedType(t); setShowTypeDrop(false) }}
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, selectedType: t }));
+                        setShowTypeDrop(false);
+                      }}
                       className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50"
                     >
-                      <div className={`w-4 h-4 border-2 rounded-full ${selectedType?.value === t.value ? 'bg-primary border-primary' : 'border-gray-300'}`} />
+                      <div
+                        className={`w-4 h-4 border-2 rounded-full ${formData.selectedType?.value === t.value ? "bg-primary border-primary" : "border-gray-300"}`}
+                      />
                       {t.label}
                     </button>
                   ))}
@@ -315,109 +317,73 @@ export default function UploadPerk() {
             </div>
           </div>
 
-          {/* ─── Upload File ─── */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Upload File</label>
-            <label
-              onDragOver={e => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-xl py-10 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${dragging ? 'border-primary bg-primary-light' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}`}
-            >
-              <input type="file" className="hidden" onChange={handleFileInput} disabled={submitting} />
-              <Video size={18} className="text-primary" />
-              <span className="text-sm text-gray-500">
-                {fileName || 'Tap to upload, or drag a file here'}
-              </span>
-            </label>
-          </div>
-
-          {/* ─── Link to Campaign ─── */}
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-              Link to Campaign <span className="text-gray-400 font-normal">(optional)</span>
+              Upload File
             </label>
-            {campaignsError ? (
-              <p className="text-xs text-red-500">{campaignsError}</p>
-            ) : (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => { setShowCampDrop(!showCampDrop); setShowTypeDrop(false); setShowCatDrop(false) }}
-                  className="input-field text-left flex items-center justify-between"
-                  disabled={loadingCampaigns || submitting}
-                >
-                  <span className={selectedCampaign ? 'text-gray-800' : 'text-gray-400'}>
-                    {loadingCampaigns
-                      ? 'Loading campaigns...'
-                      : selectedCampaign?.campaignName || selectedCampaign?.name || 'Select a campaign to link'}
-                  </span>
-                  <ChevronDown size={15} className="text-gray-400 shrink-0" />
-                </button>
-                {showCampDrop && (
-                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedCampaign(null); setShowCampDrop(false) }}
-                      className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-400"
-                    >
-                      None
-                    </button>
-                    {campaigns.length === 0 ? (
-                      <p className="px-4 py-2.5 text-sm text-gray-400">No campaigns found</p>
-                    ) : (
-                      campaigns.map((c) => {
-                        const id = c._id || c.id
-                        const name = c.campaignName || c.name
-                        return (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => { setSelectedCampaign(c); setShowCampDrop(false) }}
-                            className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                          >
-                            <div className={`w-4 h-4 border-2 rounded ${selectedCampaign?._id === id || selectedCampaign?.id === id ? 'bg-primary border-primary' : 'border-gray-300'} flex items-center justify-center shrink-0`}>
-                              {(selectedCampaign?._id === id || selectedCampaign?.id === id) && <Check size={10} className="text-white" />}
-                            </div>
-                            {name}
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-xl py-10 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${dragging ? "border-primary bg-primary-light" : "border-gray-300 hover:border-primary hover:bg-gray-50"}`}
+            >
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+                disabled={submitting}
+              />
+              <Video size={18} className="text-primary" />
+              <span className="text-sm text-gray-500">
+                {formData.fileName || "Tap to upload, or drag a file here"}
+              </span>
+            </label>
+            <p className="text-xs text-gray-400 mt-1">
+              File uploads aren't supported on creation yet — this sends a
+              placeholder URL for testing.
+            </p>
           </div>
 
-          {/* ─── Description ─── */}
           <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Description (optional)</label>
+            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+              Description (optional)
+            </label>
             <textarea
               className="input-field resize-none h-28"
               placeholder="Describe what fans will get when they unlock this perk..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              value={formData.description}
+              onChange={(e) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  description: e.target.value,
+                }))
+              }
               disabled={submitting}
             />
           </div>
 
-          {/* ─── Buttons ─── */}
           <div className="flex items-center gap-3 pt-2">
-            <button 
-              onClick={handleSubmit} 
-              disabled={submitting} 
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
               className="btn-primary w-auto px-6 disabled:opacity-50 flex items-center gap-2"
             >
               {submitting ? (
-                <><Loader2 size={15} className="animate-spin" /> Saving...</>
+                <>
+                  <Loader2 size={15} className="animate-spin" /> Saving...
+                </>
               ) : (
-                <><Upload size={15} /> Save to Library</>
+                <>
+                  <Upload size={15} /> Save to Library
+                </>
               )}
             </button>
-            <button 
-              onClick={() => navigate('/dashboard/perks')} 
-              disabled={submitting} 
+            <button
+              onClick={handleBack}
+              disabled={submitting}
               className="btn-outline w-auto px-6"
             >
               Cancel
@@ -426,5 +392,5 @@ export default function UploadPerk() {
         </div>
       </div>
     </div>
-  )
+  );
 }

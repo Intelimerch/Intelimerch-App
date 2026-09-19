@@ -1,9 +1,16 @@
-import { useNavigate } from 'react-router-dom'
+// src/pages/fan/Activated.jsx
+import { useNavigate, useLocation } from 'react-router-dom'
 import MobileShell from '../../components/MobileShell'
 import { Check, Smartphone } from 'lucide-react'
 
 export default function Activated() {
   const navigate = useNavigate()
+  const location = useLocation()
+  
+  // ✅ Get real fan data from location.state
+  const firstName = location.state?.firstName || localStorage.getItem('fanFirstName') || 'Fan'
+  const tagId = location.state?.tagId || ''
+
   return (
     <MobileShell bg="bg-teal-50">
       <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
@@ -31,7 +38,7 @@ export default function Activated() {
           <p className="text-sm text-gray-500">Hold your phone near the NFC tag</p>
         </div>
 
-        <button onClick={() => navigate('/fan/perks')} className="btn-primary rounded-full py-4 text-base font-bold w-full">
+        <button onClick={() => navigate('/fan/perks', { state: { tagId, firstName } })} className="btn-primary rounded-full py-4 text-base font-bold w-full">
           View My Perks →
         </button>
       </div>

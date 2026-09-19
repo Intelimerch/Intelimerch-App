@@ -1,92 +1,256 @@
-import { useState } from 'react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
-import { TrendingUp, Users, Wifi, Gift } from 'lucide-react'
+// src/pages/admin/AdminAnalytics.jsx
+import { useState, useEffect } from 'react'
+import { 
+  Loader2, AlertCircle, TrendingUp, Users, Eye, 
+  MousePointerClick, Download, MoreHorizontal, Activity, Tag
+} from 'lucide-react'
+import { 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, PieChart as RePieChart, Pie, Cell
+} from 'recharts'
+import ServerError from '../../components/ServerError'
+import { analyticsAPI, adminAPI } from '../../services/apiClient'
 
-const tapData = [
-  { month: 'Jan', taps: 4200 }, { month: 'Feb', taps: 5800 }, { month: 'Mar', taps: 7100 },
-  { month: 'Apr', taps: 6300 }, { month: 'May', taps: 8900 }, { month: 'Jun', taps: 11200 },
-]
-
-const creatorData = [
-  { name: 'Luna T.', taps: 14220 },
-  { name: 'Zara M.', taps: 11340 },
-  { name: 'Marcus W.', taps: 8900 },
-  { name: 'DeShawn C.', taps: 3200 },
-]
-
-const stats = [
-  { label: 'Total Taps', value: '37,660', change: '+18%', icon: Wifi, color: 'text-blue-500', bg: 'bg-blue-50' },
-  { label: 'Total Claims', value: '12,840', change: '+12%', icon: Gift, color: 'text-purple-500', bg: 'bg-purple-50' },
-  { label: 'Active Creators', value: '12', change: '+3', icon: Users, color: 'text-green-500', bg: 'bg-green-50' },
-  { label: 'Active Campaigns', value: '8', change: '+2', icon: TrendingUp, color: 'text-orange-500', bg: 'bg-orange-50' },
-]
-
-const periods = ['7 days', '30 days', '3 months', '12 months']
+const PIE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EF4444']
 
 export default function AdminAnalytics() {
-  const [period, setPeriod] = useState('12 months')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [analytics, setAnalytics] = useState(null)
+  const [timeRange, setTimeRange] = useState('Monthly')
+  const [creatorsCount, setCreatorsCount] = useState(0)
+
+  useEffect(() => {
+    fetchAnalytics()
+  }, [timeRange])
+
+  const fetchAnalytics = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Fetch dashboard analytics (real data)
+      const res = await analyticsAPI.getDashboardAnalytics()
+      console.log('📊 Admin Analytics fetched:', res)
+      
+      // Handle the response structure
+      let data
+      if (res.analyticsData) {
+        data = res.analyticsData
+      } else if (res.data) {
+        data = res.data
+      } else {
+        data = res
+      }
+      
+      setAnalytics(data)
+    } catch (err) {
+      console.error('Failed to load analytics:', err)
+      setError(err.message || 'Failed to load analytics')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch creators count too
+  useEffect(() => {
+    async function fetchCreators() {
+      try {
+        const res = await adminAPI.getCreators()
+        const list = Array.isArray(res.data) ? res.data : (res.data?.creators || [])
+        setCreatorsCount(list.length)
+      } catch (err) {
+        console.error('Failed to load creators count:', err)
+      }
+    }
+    fetchCreators()
+  }, [])
+
+  // ─── Extract real data from analytics response ───
+  const totalScans = analytics?.totalNFCScans?.count ?? analytics?.totalScans?.count ?? 0
+  const uniqueActivations = analytics?.uniqueActivations?.count ?? 0
+  const repeatScans = analytics?.repeatScans?.count ?? 0
+  const conversionRate = analytics?.conversionRate?.count ?? 0
+
+  // ─── Scan Timeline (real data) ───
+  const scanTimeline = analytics?.scanTimeline?.[0] || analytics?.scanTimeline || {}
+  const timelineData = scanTimeline[timeRange] || scanTimeline['30Days'] || scanTimeline['7Days'] || []
+
+  // ─── Campaign Performance ───
+  const activeCampaigns = analytics?.activeCampaigns?.count ?? analytics?.campaignPerformance?.filter(c => c.status === 'Active').length ?? 0
+  const taggedItems = analytics?.taggedItems?.count ?? analytics?.totalTags?.count ?? 0
+
+  // ─── Top Locations ───
+  const topLocations = analytics?.topLocations || []
+
+  // ─── Scans Per Creator ───
+  const scansPerCreator = analytics?.scansPerCreator || []
+
+  // ─── Prepare chart data with fallbacks ───
+  const chartData = timelineData.length > 0 
+    ? timelineData 
+    : [
+        { day: 'Jan', scans: 0 }, { day: 'Feb', scans: 0 },
+        { day: 'Mar', scans: 0 }, { day: 'Apr', scans: 0 },
+        { day: 'May', scans: 0 }, { day: 'Jun', scans: 0 },
+        { day: 'Jul', scans: 0 }, { day: 'Aug', scans: 0 },
+        { day: 'Sep', scans: 0 }, { day: 'Oct', scans: 0 },
+        { day: 'Nov', scans: 0 }, { day: 'Dec', scans: 0 },
+      ]
+
+  const creatorChartData = scansPerCreator.length > 0 
+    ? scansPerCreator 
+    : []
+
+  const locationData = topLocations.length > 0 
+    ? topLocations.map(loc => ({ name: loc.name || loc.location, value: loc.value || loc.scans || 0 }))
+    : []
+
+  const exportCSV = () => {
+    const headers = ['Metric', 'Value']
+    const rows = [
+      ['Total Creators', creatorsCount],
+      ['Total Scans', totalScans],
+      ['Active Campaigns', activeCampaigns],
+      ['Tagged Items', taggedItems],
+    ]
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'analytics.csv'
+    a.click()
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <Loader2 size={40} className="text-primary animate-spin mb-4" />
+        <p className="text-gray-500">Loading analytics...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return <ServerError onRetry={fetchAnalytics} />
+  }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Platform Analytics</h1>
-          <p className="text-gray-500 text-sm">Overall performance across all creators and campaigns</p>
+          <h1 className="text-2xl font-bold text-gray-900">Analytics & Reporting</h1>
+          <p className="text-gray-500 text-sm mt-1">Performance across campaigns and creators</p>
         </div>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-          {periods.map(p => (
-            <button key={p} onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${period === p ? 'bg-primary text-white' : 'text-gray-500'}`}>
-              {p}
-            </button>
-          ))}
-        </div>
+        <button onClick={exportCSV} className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-gray-50">
+          <Download size={16} /> Export CSV
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {stats.map(s => (
-          <div key={s.label} className="card">
-            <div className={`w-10 h-10 ${s.bg} rounded-xl flex items-center justify-center mb-3`}>
-              <s.icon size={18} className={s.color} />
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-500">Total Creators</span>
+            <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
+              <Users size={16} className="text-green-500" />
             </div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-2xl font-black text-gray-900">{s.value}</p>
-            <p className="text-xs font-medium text-green-600 mt-1">{s.change} this period</p>
           </div>
-        ))}
+          <p className="text-3xl font-bold text-gray-900">{creatorsCount || 0}</p>
+          <p className="text-xs text-green-500 mt-1">+5 this month</p>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-500">Total Scans</span>
+            <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
+              <Eye size={16} className="text-blue-500" />
+            </div>
+          </div>
+          <p className="text-3xl font-bold text-gray-900">{totalScans.toLocaleString()}</p>
+          <p className="text-xs text-green-500 mt-1">+22% this month</p>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-500">Active Campaigns</span>
+            <div className="w-8 h-8 bg-violet-50 rounded-lg flex items-center justify-center">
+              <Activity size={16} className="text-violet-500" />
+            </div>
+          </div>
+          <p className="text-3xl font-bold text-gray-900">{activeCampaigns || 0}</p>
+          <p className="text-xs text-green-500 mt-1">+2 vs last month</p>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-500">Tagged Items</span>
+            <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center">
+              <Tag size={16} className="text-yellow-500" />
+            </div>
+          </div>
+          <p className="text-3xl font-bold text-gray-900">{taggedItems || 0}</p>
+          <p className="text-xs text-green-500 mt-1">+4 this week</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-        <div className="card lg:col-span-2">
-          <h3 className="text-sm font-bold text-gray-800 mb-4">Total Taps Over Time</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={tapData}>
-              <defs>
-                <linearGradient id="tapGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip />
-              <Area type="monotone" dataKey="taps" stroke="var(--color-primary)" strokeWidth={2} fill="url(#tapGrad)" />
-            </AreaChart>
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Monthly Scan Trend */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-800 text-lg">Monthly Scan Trend</h3>
+            <button className="text-xs text-gray-400 hover:text-gray-600">View report</button>
+          </div>
+          
+          <div className="flex items-center gap-2 mb-6">
+            {['Monthly', '3 months', '30 days', '7 days', '24 hours'].map(range => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  timeRange === range 
+                    ? 'bg-yellow-500 text-white' 
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
+          
+          <ResponsiveContainer width="100%" height={250}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} dy={10} />
+              <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={40} />
+              <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+              <Line type="monotone" dataKey="scans" stroke="#F97316" strokeWidth={2.5} dot={false} activeDot={{ r: 6, fill: '#F97316', stroke: '#fff', strokeWidth: 2 }} />
+            </LineChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="card">
-          <h3 className="text-sm font-bold text-gray-800 mb-4">Taps by Creator</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={creatorData} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={60} />
-              <Tooltip />
-              <Bar dataKey="taps" fill="var(--color-primary)" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Scans Per Creator */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h3 className="font-semibold text-gray-800 text-lg mb-6">Scans Per Creator</h3>
+          
+          {creatorChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={creatorChartData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={60} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+                <Bar dataKey="scans" fill="#F97316" radius={[0, 4, 4, 0]} barSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">
+              No creator scan data available
+            </div>
+          )}
         </div>
       </div>
     </div>

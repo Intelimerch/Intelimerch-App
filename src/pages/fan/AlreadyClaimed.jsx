@@ -1,19 +1,31 @@
-import { useSearchParams } from 'react-router-dom'
+// src/pages/fan/AlreadyClaimed.jsx
+import { useLocation, useSearchParams } from 'react-router-dom'
 import MobileShell from '../../components/MobileShell'
 import { Lock } from 'lucide-react'
 
 export default function AlreadyClaimed() {
+  const location = useLocation()
   const [params] = useSearchParams()
-  const ig = params.get('ig') || '#'
-  const yt = params.get('yt') || '#'
-  const sp = params.get('sp') || '#'
+  
+  // ✅ Get real creator name from multiple sources
+  const creatorName = 
+    location.state?.creatorName || 
+    params.get('creator') || 
+    localStorage.getItem('creatorName') || 
+    'the owner'
+
+  // ✅ Social links (always shown - even if empty, use default)
+  const ig = params.get('ig') || 'https://instagram.com'
+  const yt = params.get('yt') || 'https://youtube.com'
+  const sp = params.get('sp') || 'https://spotify.com'
   const tt = params.get('tt') || ''
   const tw = params.get('tw') || ''
 
-  const SocialLink = ({ href, icon, label, className }) => (
-    href && href !== '#'
-      ? <a href={href} target="_blank" rel="noreferrer" className={className}>{icon}{label}</a>
-      : null
+  const SocialLink = ({ href, icon, label }) => (
+    <a href={href} target="_blank" rel="noreferrer"
+      className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
+      {icon}{label}
+    </a>
   )
 
   return (
@@ -28,7 +40,9 @@ export default function AlreadyClaimed() {
         </div>
 
         <h1 className="text-5xl font-black text-gray-900 leading-tight mb-4">HOLD UP</h1>
-        <p className="text-primary font-bold text-lg mb-3">This merch belongs to Nadine 🖐</p>
+        <p className="text-primary font-bold text-lg mb-3">
+          This merch belongs to {creatorName} 🖐
+        </p>
         <p className="text-gray-500 text-sm mb-10 leading-relaxed max-w-xs">
           This piece is registered to another fan. Each NFC tag is unique and tied to one person.
         </p>
@@ -37,32 +51,16 @@ export default function AlreadyClaimed() {
           Get Your Own Merch
         </a>
 
-        <p className="font-semibold text-gray-800 mb-4">But while you're here follow Jenny</p>
+        <p className="font-semibold text-gray-800 mb-4">But while you're here follow {creatorName}</p>
         <div className="flex flex-wrap gap-3 w-full justify-center">
-          <a href={ig} target="_blank" rel="noreferrer"
-            className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-            <InstagramIcon /> Instagram
-          </a>
-          <a href={yt} target="_blank" rel="noreferrer"
-            className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-            <YouTubeIcon /> YouTube
-          </a>
-          <a href={sp} target="_blank" rel="noreferrer"
-            className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-            <SpotifyIcon /> Spotify
-          </a>
-          {tt && (
-            <a href={tt} target="_blank" rel="noreferrer"
-              className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-              🎵 TikTok
-            </a>
-          )}
-          {tw && (
-            <a href={tw} target="_blank" rel="noreferrer"
-              className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-              𝕏 Twitter
-            </a>
-          )}
+          {/* ✅ Social icons - ALWAYS show the main 3 */}
+          <SocialLink href={ig} label="Instagram" icon={<InstagramIcon />} />
+          <SocialLink href={yt} label="YouTube" icon={<YouTubeIcon />} />
+          <SocialLink href={sp} label="Spotify" icon={<SpotifyIcon />} />
+          
+          {/* ✅ Optional socials - only show if provided */}
+          {tt && <SocialLink href={tt} label="TikTok" icon={<span>🎵</span>} />}
+          {tw && <SocialLink href={tw} label="Twitter" icon={<span>𝕏</span>} />}
         </div>
       </div>
     </MobileShell>

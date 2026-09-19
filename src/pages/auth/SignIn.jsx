@@ -56,10 +56,20 @@ export default function SignIn() {
     setIsLoading(true)
 
     try {
-      // The backend accepts both email and phone as string
-      // Pass the identifier directly — backend will figure out if it's email or phone
-      await login(identifier, password)
-      navigate('/dashboard')
+      // ✅ DEBUG: Log the full login response
+      const response = await login(identifier, password)
+      console.log('✅ Login response:', JSON.stringify(response))
+      console.log('🎯 Account Type:', response?.user?.accountType || response?.accountType || response?.data?.accountType || 'USER')
+
+      // ✅ FIXED: Get accountType from response
+      const accountType = response?.user?.accountType || response?.accountType || response?.data?.accountType || 'USER'
+      
+      // ✅ FIXED: Redirect based on accountType
+    if (accountType === 'ADMIN' || accountType === 'INTERNAL_TEAM' || accountType === 'INTERNAL' || accountType === 'SUPER_ADMIN' || accountType === 'STAFF') {
+        navigate('/admin')
+      } else {
+        navigate('/dashboard')
+      }
     } catch (err) {
       console.error('❌ Login error:', err)
       setError(err.message || 'Invalid credentials. Please try again.')
@@ -96,9 +106,6 @@ export default function SignIn() {
             required
             disabled={isLoading}
           />
-          {/* <p className="text-xs text-gray-400 mt-1">
-            Use your email (e.g. user@example.com) or phone (e.g. 2348012345678)
-          </p> */}
         </div>
 
         {/* ─── Password ────────────────────────────────── */}

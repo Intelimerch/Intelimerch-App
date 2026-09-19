@@ -23,13 +23,28 @@ export function AuthProvider({ children }) {
 
   const login = async (identifier, password) => {
     const response = await authAPI.login(identifier, password);
+    console.log('📦 Login response:', response);
 
-    // Backend returns the user object under "data", not "user"
-    const loggedInUser = response.data;
+    // ✅ FIXED: Extract user and tokens from the response
+    const loggedInUser = response.user || response.data || response;
+    const accessToken = response.accessToken || response.token;
+    const refreshToken = response.refreshToken || null;
 
-    setToken(response.accessToken);
-    setUser(loggedInUser);
-    localStorage.setItem('user', JSON.stringify(loggedInUser));
+    // ✅ Ensure accountType is captured
+    const userWithRole = {
+      ...loggedInUser,
+      accountType: loggedInUser.accountType || loggedInUser.role || 'USER'
+    };
+
+    // Store tokens
+    setToken(accessToken);
+    if (refreshToken) {
+      localStorage.setItem('refreshToken', refreshToken);
+    }
+
+    // Store user
+    setUser(userWithRole);
+    localStorage.setItem('user', JSON.stringify(userWithRole));
 
     return response;
   };
@@ -38,9 +53,10 @@ export function AuthProvider({ children }) {
     try {
       await authAPI.logout();
     } catch {
-      // ignore errors on logout
+      // ignore errors
     }
     clearToken();
+    localStorage.removeItem('refreshToken');
     setUser(null);
     localStorage.removeItem('user');
   };
@@ -51,11 +67,15 @@ export function AuthProvider({ children }) {
 
   const refreshProfile = async () => {
     const response = await authAPI.getProfile();
-    // Adjust this if /auth/me/profile also nests the user under "data"
-    // rather than "user" — worth checking in Swagger.
-    const profileUser = response.data ?? response.user;
-    setUser(profileUser);
-    localStorage.setItem('user', JSON.stringify(profileUser));
+    const profileUser = response.data ?? response.user ?? response;
+    
+    const profileUserWithRole = {
+      ...profileUser,
+      accountType: profileUser.accountType || profileUser.role || 'USER'
+    };
+    
+    setUser(profileUserWithRole);
+    localStorage.setItem('user', JSON.stringify(profileUserWithRole));
   };
 
   return (

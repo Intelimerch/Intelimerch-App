@@ -1,36 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+// src/pages/dashboard/Campaigns.jsx
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, Link,
-  X, Copy, Check, Loader2, Target, AlertCircle
-} from 'lucide-react'
+import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import { campaignAPI } from '../../services/apiClient'
+import ServerError from '../../components/ServerError'
 
-// ─── Professional Error Parser ──────────────────────────
-function parseErrorMessage(error) {
-  const message = error?.message || '';
-  
-  if (message.includes('<!DOCTYPE') || message.includes('HTML')) {
-    return 'Server error. Please check your connection and try again.';
-  }
-  if (message.includes('401') || message.includes('Unauthorized')) {
-    return 'Your session has expired. Please log in again.';
-  }
-  if (message.includes('403') || message.includes('Forbidden')) {
-    return 'You don\'t have permission to perform this action.';
-  }
-  if (message.includes('404') || message.includes('Not Found')) {
-    return 'The campaign you\'re trying to delete no longer exists.';
-  }
-  if (message.includes('500') || message.includes('Internal Server Error')) {
-    return 'Something went wrong on our server. Please try again later.';
-  }
-  if (message.includes('ECONNREFUSED') || message.includes('NetworkError')) {
-    return 'Cannot connect to the server. Please check your internet connection.';
-  }
-  return message || 'An unexpected error occurred. Please try again.';
-}
+const PAGE_SIZE = 20
 
 export default function Campaigns() {
   const navigate = useNavigate()
@@ -42,53 +18,42 @@ export default function Campaigns() {
   const [filter, setFilter] = useState('All')
   const [editingCampaign, setEditingCampaign] = useState(null)
   const [editForm, setEditForm] = useState({})
-  const [genLink, setGenLink] = useState(null)
-  const [copied, setCopied] = useState(false)
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
-  const buttonRefs = useRef({})
 
-  // ─── UI Error State ───
-  const [uiError, setUiError] = useState(null)
-
-  // ─── Delete Modal State ───
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, campaignId: null, campaignName: '' })
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [hasNextPage, setHasNextPage] = useState(false)
+  const [hasPreviousPage, setHasPreviousPage] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
   const filters = ['All', 'Active', 'Paused', 'Draft']
 
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = async (page = 1) => {
     try {
       setLoading(true)
       setError(null)
-      setUiError(null)
-      const response = await campaignAPI.getAll()
+      const response = await campaignAPI.getAll(page, PAGE_SIZE)
       console.log('📦 Campaigns fetched:', response)
       const list = Array.isArray(response.data) ? response.data : (response.data?.campaigns || [])
       setCampaigns(list)
+      const pagination = response.pagination || {}
+      setCurrentPage(pagination.page || 1)
+      setTotalPages(pagination.totalPages || 1)
+      setTotalItems(pagination.total || list.length)
+      setHasNextPage(pagination.hasNextPage || false)
+      setHasPreviousPage(pagination.hasPreviousPage || false)
+      setPageSize(pagination.limit || PAGE_SIZE)
     } catch (err) {
       console.error('❌ Error fetching campaigns:', err)
-      const friendlyMessage = parseErrorMessage(err)
-      setError(friendlyMessage)
-      setUiError(friendlyMessage)
+      setError(err.message || 'Failed to load campaigns')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchCampaigns()
+    fetchCampaigns(1)
   }, [])
-
-  // ─── Close dropdown when clicking outside ───
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (openMenu && !e.target.closest('.dropdown-menu') && !e.target.closest('.dropdown-trigger')) {
-        setOpenMenu(null)
-      }
-    }
-    document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [openMenu])
 
   const filtered = campaigns.filter(c => {
     const matchesFilter = filter === 'All' || c.status?.toLowerCase() === filter.toLowerCase()
@@ -96,67 +61,31 @@ export default function Campaigns() {
     return matchesFilter && matchesSearch
   })
 
-  // ─── Open dropdown with position calculation ───
-  const openDropdown = (e, id) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const dropdownWidth = 160
-    const dropdownHeight = 180
-    
-    let left = rect.right - dropdownWidth
-    let top = rect.bottom + 4
-
-    if (left < 10) {
-      left = 10
-    }
-    if (left + dropdownWidth > window.innerWidth - 10) {
-      left = window.innerWidth - dropdownWidth - 10
-    }
-    if (top + dropdownHeight > window.innerHeight - 10) {
-      top = rect.top - dropdownHeight - 4
-    }
-    if (top < 10) {
-      top = 10
-    }
-
-    setMenuPosition({ top, left })
-    setOpenMenu(openMenu === id ? null : id)
-  }
-
-  // ─── Delete Campaign ───
-  const confirmDelete = (id, name) => {
-    setUiError(null)
-    setDeleteModal({ isOpen: true, campaignId: id, campaignName: name || 'this campaign' })
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return
+    setCurrentPage(newPage)
+    fetchCampaigns(newPage)
     setOpenMenu(null)
   }
 
-  const handleDelete = async () => {
-    const { campaignId } = deleteModal
-    if (!campaignId) return
-    
-    setIsDeleting(true)
-    setUiError(null)
+  useEffect(() => {
+    fetchCampaigns(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
+
+  const handleDelete = async (campaignId) => {
+    if (!confirm('Are you sure you want to delete this campaign?')) return
     try {
-      console.log(`🗑️ Deleting campaign: ${campaignId}`)
       await campaignAPI.delete(campaignId)
-      console.log(`✅ Campaign deleted successfully`)
-      await fetchCampaigns()
-      setDeleteModal({ isOpen: false, campaignId: null, campaignName: '' })
+      fetchCampaigns(currentPage)
+      setOpenMenu(null)
     } catch (err) {
-      console.error('Error deleting campaign:', err)
-      const friendlyMessage = parseErrorMessage(err)
-      setUiError(friendlyMessage)
-    } finally {
-      setIsDeleting(false)
+      console.error('❌ Error deleting campaign:', err)
+      alert(err.message || 'Failed to delete campaign')
     }
   }
 
-  const closeDeleteModal = () => {
-    setDeleteModal({ isOpen: false, campaignId: null, campaignName: '' })
-  }
-
-  // ─── Edit Campaign ───
   const openEdit = (c) => {
-    setUiError(null)
     setEditForm({
       name: c.campaignName || c.name,
       status: c.status || 'Draft',
@@ -168,7 +97,6 @@ export default function Campaigns() {
   }
 
   const saveEdit = async () => {
-    setUiError(null)
     try {
       const updated = await campaignAPI.update(editingCampaign, {
         campaignName: editForm.name,
@@ -176,34 +104,12 @@ export default function Campaigns() {
         startDate: editForm.startDate,
         endDate: editForm.endDate,
       })
-      setCampaigns(prev => prev.map(c =>
-        (c.id === editingCampaign || c.campaignId === editingCampaign || c._id === editingCampaign)
-          ? { ...c, ...updated }
-          : c
-      ))
+      fetchCampaigns(currentPage)
       setEditingCampaign(null)
     } catch (err) {
       console.error('❌ Error updating campaign:', err)
-      const friendlyMessage = parseErrorMessage(err)
-      setUiError(friendlyMessage)
+      alert(err.message || 'Failed to update campaign')
     }
-  }
-
-  // ─── Generate Link ───
-  const handleGenLink = (c) => {
-    const uid = `NFC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-    setGenLink({
-      campaign: c.campaignName || c.name,
-      url: `https://intelimerch.app/nfc/${uid}`,
-      id: uid
-    })
-    setOpenMenu(null)
-  }
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(genLink.url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
   }
 
   if (loading) {
@@ -215,16 +121,8 @@ export default function Campaigns() {
     )
   }
 
-  if (error && !uiError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 mb-4 text-center max-w-md">{error}</p>
-        <button onClick={fetchCampaigns} className="btn-primary">
-          Retry
-        </button>
-      </div>
-    )
+  if (error && campaigns.length === 0) {
+    return <ServerError onRetry={() => fetchCampaigns(currentPage)} />
   }
 
   return (
@@ -239,30 +137,17 @@ export default function Campaigns() {
         </button>
       </div>
 
-      {/* ─── Professional UI Error Display ─── */}
-      {uiError && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3">
-          <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
-          <div className="flex-1">
-            <p className="text-sm font-medium">{uiError}</p>
-            <button 
-              onClick={() => setUiError(null)}
-              className="text-xs text-red-600 hover:text-red-800 mt-1 font-medium"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="card mb-4 overflow-visible">
+      <div className="card mb-4">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               placeholder="Search campaigns..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => {
+                setSearch(e.target.value)
+                if (currentPage !== 1) fetchCampaigns(1)
+              }}
               className="input-field pl-9"
             />
           </div>
@@ -281,116 +166,112 @@ export default function Campaigns() {
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<Target size={40} className="text-gray-300" />}
+            icon="🎯"
             title={search || filter !== 'All' ? 'No campaigns found' : 'No campaigns yet'}
             description={search || filter !== 'All' ? 'Try adjusting your filters or search term.' : 'Create your first campaign to link NFC tags to exclusive fan experiences.'}
             action={() => navigate('/dashboard/campaigns/create')}
             actionLabel="Create Campaign"
           />
         ) : (
-          <div className="overflow-x-auto overflow-y-visible">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
-                  <th className="pb-3 font-semibold">Campaign</th>
-                  <th className="pb-3 font-semibold">Status</th>
-                  <th className="pb-3 font-semibold">Taps</th>
-                  <th className="pb-3 font-semibold">Claims</th>
-                  <th className="pb-3 font-semibold">Products</th>
-                  <th className="pb-3 font-semibold">Start / End</th>
-                  <th className="pb-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((c, index) => {
-                  const id = c.id || c.campaignId || c._id || index
-                  return (
-                    <tr key={id} className="hover:bg-gray-50/50">
-                      <td className="py-3.5">
-                        <div className="font-medium text-gray-900">{c.campaignName || c.name}</div>
-                        <div className="text-xs text-gray-400">{id}</div>
-                      </td>
-                      <td className="py-3.5"><StatusBadge status={c.status} /></td>
-                      <td className="py-3.5 font-medium">{c.taps?.toLocaleString() || '0'}</td>
-                      <td className="py-3.5">{c.claims?.toLocaleString() || '0'}</td>
-                      <td className="py-3.5">{c.products || '0'} linked</td>
-                      <td className="py-3.5 text-gray-500 text-xs">
-                        {c.startDate ? new Date(c.startDate).toLocaleDateString() : '—'}
-                        <br />
-                        <span className="text-gray-400">→ {c.endDate ? new Date(c.endDate).toLocaleDateString() : '—'}</span>
-                      </td>
-                      <td className="py-3.5 text-right relative">
-                        <button
-                          ref={(el) => { buttonRefs.current[id] = el }}
-                          onClick={(e) => openDropdown(e, id)}
-                          className="dropdown-trigger p-1.5 hover:bg-gray-100 rounded-lg inline-flex items-center justify-center"
-                        >
-                          <MoreHorizontal size={16} className="text-gray-500" />
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                    <th className="pb-3 font-semibold">Campaign</th>
+                    <th className="pb-3 font-semibold">Status</th>
+                    <th className="pb-3 font-semibold">Taps</th>
+                    <th className="pb-3 font-semibold">Claims</th>
+                    <th className="pb-3 font-semibold">Products</th>
+                    <th className="pb-3 font-semibold">Start / End</th>
+                    <th className="pb-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered.map((c, index) => {
+                    const id = c.id || c.campaignId || c._id || index
+                    return (
+                      <tr key={id} className="hover:bg-gray-50/50">
+                        <td className="py-3.5">
+                          <div className="font-medium text-gray-900">{c.campaignName || c.name}</div>
+                          <div className="text-xs text-gray-400">{id}</div>
+                        </td>
+                        <td className="py-3.5"><StatusBadge status={c.status} /></td>
+                        <td className="py-3.5 font-medium">{c.taps?.toLocaleString() || '0'}</td>
+                        <td className="py-3.5">{c.claims?.toLocaleString() || '0'}</td>
+                        <td className="py-3.5">{c.products || '0'} linked</td>
+                        <td className="py-3.5 text-gray-500 text-xs">
+                          {c.startDate ? new Date(c.startDate).toLocaleDateString() : '—'}
+                          <br />
+                          <span className="text-gray-400">→ {c.endDate ? new Date(c.endDate).toLocaleDateString() : '—'}</span>
+                        </td>
+                        <td className="py-3.5 relative">
+                          <button onClick={() => setOpenMenu(openMenu === id ? null : id)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                            <MoreHorizontal size={16} className="text-gray-500" />
+                          </button>
+                          {openMenu === id && (
+                            <div className="absolute right-0 top-full bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 w-44">
+                              <MenuBtn
+                                icon={<BarChart2 size={14} />}
+                                label="Analytics"
+                                onClick={() => navigate(`/dashboard/campaigns/${id}/analytics`)}
+                              />
+                              <MenuBtn
+                                icon={<Tag size={14} />}
+                                label="View Tags"
+                                onClick={() => navigate(`/dashboard/tag-groups?campaignId=${id}`)}
+                              />
+                              <MenuBtn
+                                icon={<Pencil size={14} />}
+                                label="Edit Details"
+                                onClick={() => openEdit(c)}
+                              />
+                              <MenuBtn
+                                icon={<Trash2 size={14} />}
+                                label="Delete"
+                                danger
+                                onClick={() => handleDelete(id)}
+                              />
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-100">
+              <p className="text-xs text-gray-500">
+                Showing <span className="font-medium">{((currentPage - 1) * pageSize) + 1}</span> to{' '}
+                <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> of{' '}
+                <span className="font-medium">{totalItems}</span> campaigns
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={!hasPreviousPage}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  Previous
+                </button>
+                <span className="text-sm font-medium text-gray-700 px-2">Page {currentPage} of {totalPages}</span>
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={!hasNextPage}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
-      {/* ─── FIXED POSITION DROPDOWN MENU ─── */}
-      {openMenu !== null && (
-        <>
-          <div className="fixed inset-0 z-[997]" onClick={() => setOpenMenu(null)} />
-          <div
-            className="dropdown-menu fixed bg-white border border-gray-200 rounded-xl shadow-lg z-[999] py-1 w-48 min-w-[160px]"
-            style={{
-              top: menuPosition.top,
-              left: menuPosition.left,
-            }}
-          >
-            <MenuBtn
-              icon={<BarChart2 size={14} />}
-              label="Analytics"
-              onClick={() => {
-                setOpenMenu(null)
-                navigate(`/dashboard/campaigns/${openMenu}/analytics`)
-              }}
-            />
-            <MenuBtn
-              icon={<Link size={14} />}
-              label="Generate Link"
-              onClick={() => {
-                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
-                setOpenMenu(null)
-                if (campaign) handleGenLink(campaign)
-              }}
-            />
-            <MenuBtn
-              icon={<Pencil size={14} />}
-              label="Edit Details"
-              onClick={() => {
-                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
-                setOpenMenu(null)
-                if (campaign) openEdit(campaign)
-              }}
-            />
-            <MenuBtn
-              icon={<Trash2 size={14} />}
-              label="Delete"
-              danger
-              onClick={() => {
-                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
-                setOpenMenu(null)
-                if (campaign) confirmDelete(openMenu, campaign.campaignName || campaign.name)
-              }}
-            />
-          </div>
-        </>
-      )}
-
-      {/* Edit Campaign Modal */}
       {editingCampaign && (
-        <div className="fixed inset-0 bg-black/40 z-[999] flex items-center justify-center p-4" onClick={() => setEditingCampaign(null)}>
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditingCampaign(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold text-gray-900">Edit Campaign Details</h2>
@@ -446,90 +327,7 @@ export default function Campaigns() {
         </div>
       )}
 
-      {/* Generate Link Modal */}
-      {genLink && (
-        <div className="fixed inset-0 bg-black/40 z-[999] flex items-center justify-center p-4" onClick={() => setGenLink(null)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-gray-900">Tag Link Generated</h2>
-              <button onClick={() => setGenLink(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
-            </div>
-            <p className="text-sm text-gray-500 mb-4">Unique NFC tag link for <span className="font-semibold text-gray-800">{genLink.campaign}</span></p>
-            <div className="bg-gray-50 rounded-xl p-3 mb-2">
-              <p className="text-xs text-gray-500 mb-1">Tag ID</p>
-              <p className="text-sm font-mono font-bold text-primary">{genLink.id}</p>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 mb-5">
-              <p className="text-xs text-gray-500 mb-1">NFC URL</p>
-              <p className="text-sm font-mono text-gray-800 break-all">{genLink.url}</p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={copyLink} className="btn-primary flex-1 gap-2">
-                {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Link</>}
-              </button>
-              <button onClick={() => { setGenLink(null); navigate('/dashboard/tag-groups') }} className="btn-outline flex-1">
-                View Tag Manager →
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Delete Confirmation Modal ─── */}
-      {deleteModal.isOpen && (
-        <div className="fixed inset-0 bg-black/50 z-[999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold text-gray-900">Delete Campaign</h2>
-              <button
-                onClick={closeDeleteModal}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
-                disabled={isDeleting}
-              >
-                <X size={20} className="text-gray-500" />
-              </button>
-            </div>
-
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
-                <Trash2 size={32} className="text-red-500" />
-              </div>
-            </div>
-
-            <p className="text-center text-gray-600 mb-6">
-              Are you sure you want to delete <span className="font-semibold text-gray-900">"{deleteModal.campaignName}"</span>? 
-              This action cannot be undone and all associated data will be removed.
-            </p>
-
-            <div className="flex gap-3">
-              <button
-                onClick={closeDeleteModal}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-red-500 rounded-xl hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={16} />
-                    Delete
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {openMenu && <div className="fixed inset-0 z-0" onClick={() => setOpenMenu(null)} />}
     </div>
   )
 }
@@ -538,7 +336,7 @@ function MenuBtn({ icon, label, onClick, danger }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 transition-all ${danger ? 'text-red-500 hover:bg-red-50' : 'text-gray-700'}`}
+      className={`flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-gray-50 ${danger ? 'text-red-500' : 'text-gray-700'}`}
     >
       {icon}{label}
     </button>

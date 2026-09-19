@@ -1,3 +1,4 @@
+// src/pages/dashboard/PerksLibrary.jsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -12,10 +13,13 @@ import {
   Loader2,
   AlertCircle,
   Gift,
-  Save
+  Save,
+  ChevronDown,
 } from "lucide-react";
 import EmptyState from "../../components/EmptyState";
 import { perksAPI } from "../../services/apiClient";
+import { useFormPersistence } from "../../hooks/useFormPersistence";
+import ServerError from "../../components/ServerError";
 
 const typeBadge = {
   video: "bg-red-50 text-red-500",
@@ -30,14 +34,12 @@ const typeIconMap = {
   image: Image,
   document: FileText,
 };
-
 const typeIconBg = {
   video: "bg-red-50",
   link: "bg-purple-50",
   image: "bg-teal-50",
   document: "bg-yellow-50",
 };
-
 const typeIconColor = {
   video: "text-red-400",
   link: "text-purple-400",
@@ -45,35 +47,29 @@ const typeIconColor = {
   document: "text-yellow-500",
 };
 
-const statusMap = {
-  'active': 'Active',
-  'expired': 'Expired',
-  'draft': 'Draft',
-};
+const statusMap = { active: "Active", expired: "Expired", draft: "Draft" };
 
-// ─── Professional Error Parser ──────────────────────────
+const KNOWN_CATEGORIES = [
+  { _id: "6a47f7bd57683e966000296e", name: "Classic Access" },
+  { _id: "6a47dff4b09ae7642a078972", name: "Premium Access" },
+  { _id: "6a494f1aa4164eab48bf52aa", name: "Premium Access" },
+];
+
 function parseErrorMessage(error) {
-  const message = error?.message || '';
-  
-  if (message.includes('<!DOCTYPE') || message.includes('HTML')) {
-    return 'Server error. Please check your connection and try again.';
-  }
-  if (message.includes('401') || message.includes('Unauthorized')) {
-    return 'Your session has expired. Please log in again.';
-  }
-  if (message.includes('403') || message.includes('Forbidden')) {
-    return 'You don\'t have permission to perform this action.';
-  }
-  if (message.includes('404') || message.includes('Not Found')) {
-    return 'The item you\'re trying to delete no longer exists.';
-  }
-  if (message.includes('500') || message.includes('Internal Server Error')) {
-    return 'Something went wrong on our server. Please try again later.';
-  }
-  if (message.includes('ECONNREFUSED') || message.includes('NetworkError')) {
-    return 'Cannot connect to the server. Please check your internet connection.';
-  }
-  return message || 'An unexpected error occurred. Please try again.';
+  const message = error?.message || "";
+  if (message.includes("<!DOCTYPE") || message.includes("HTML"))
+    return "Server error. Please check your connection and try again.";
+  if (message.includes("401") || message.includes("Unauthorized"))
+    return "Your session has expired. Please log in again.";
+  if (message.includes("403") || message.includes("Forbidden"))
+    return "You don't have permission to perform this action.";
+  if (message.includes("404") || message.includes("Not Found"))
+    return "The item you're trying to delete no longer exists.";
+  if (message.includes("500") || message.includes("Internal Server Error"))
+    return "Something went wrong on our server. Please try again later.";
+  if (message.includes("ECONNREFUSED") || message.includes("NetworkError"))
+    return "Cannot connect to the server. Please check your internet connection.";
+  return message || "An unexpected error occurred. Please try again.";
 }
 
 export default function PerksLibrary() {
@@ -81,24 +77,57 @@ export default function PerksLibrary() {
   const [perks, setPerks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [editingPerk, setEditingPerk] = useState(null);
-  const [editForm, setEditForm] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // ─── Delete Modal State ───
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, perkId: null, perkName: '' });
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [uiError, setUiError] = useState(null); // For professional UI error display
 
-  // ─── Fetch Perks from API ───
+  const [editingPerk, setEditingPerk] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("editing_perk");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (editingPerk) {
+      sessionStorage.setItem("editing_perk", JSON.stringify(editingPerk));
+    } else {
+      sessionStorage.removeItem("editing_perk");
+    }
+  }, [editingPerk]);
+
+  const [editForm, setEditForm, clearEditForm] = useFormPersistence(
+    "edit_perk_form",
+    {
+      perkName: "",
+      contentType: "link",
+      description: "",
+      perkCategoryId: "",
+      status: "Active",
+      file: null,
+    },
+  );
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uiError, setUiError] = useState(null);
+
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    perkId: null,
+    perkName: "",
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [showCatDrop, setShowCatDrop] = useState(false);
+
   const fetchPerks = async () => {
     try {
       setLoading(true);
       setError(null);
       setUiError(null);
       const response = await perksAPI.getAll();
-      console.log("Perks fetched:", response);
-      setPerks(response.data || response || []);
+      setPerks(response.data || []);
     } catch (err) {
       console.error("Error fetching perks:", err);
       const friendlyMessage = parseErrorMessage(err);
@@ -113,68 +142,74 @@ export default function PerksLibrary() {
     fetchPerks();
   }, []);
 
-  // ─── Delete Perk ───
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const res = await perksAPI.getCategories();
+        const live = res.data || [];
+        setCategories(live.length > 0 ? live : KNOWN_CATEGORIES);
+      } catch (err) {
+        console.error(
+          "Failed to load perk categories, using known fallback:",
+          err,
+        );
+        setCategories(KNOWN_CATEGORIES);
+      } finally {
+        setLoadingCategories(false);
+      }
+    }
+    loadCategories();
+  }, []);
+
   const confirmDelete = (id, name) => {
     setUiError(null);
-    setDeleteModal({ isOpen: true, perkId: id, perkName: name || 'this perk' });
+    setDeleteModal({ isOpen: true, perkId: id, perkName: name || "this perk" });
   };
 
   const handleDelete = async () => {
     const { perkId } = deleteModal;
     if (!perkId) return;
-    
     setIsDeleting(true);
     setUiError(null);
     try {
-      console.log(`🗑️ Deleting perk: ${perkId}`);
       await perksAPI.remove(perkId);
-      console.log(`✅ Perk deleted successfully`);
       await fetchPerks();
-      setDeleteModal({ isOpen: false, perkId: null, perkName: '' });
+      setDeleteModal({ isOpen: false, perkId: null, perkName: "" });
     } catch (err) {
       console.error("Error deleting perk:", err);
-      const friendlyMessage = parseErrorMessage(err);
-      setUiError(friendlyMessage);
+      setUiError(parseErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const closeDeleteModal = () => {
-    setDeleteModal({ isOpen: false, perkId: null, perkName: '' });
-  };
+  const closeDeleteModal = () =>
+    setDeleteModal({ isOpen: false, perkId: null, perkName: "" });
 
-  // ─── Save Edit ───
   const saveEdit = async () => {
     if (!editingPerk) return;
     const id = editingPerk._id || editingPerk.id;
-    
+
     setIsSubmitting(true);
     setUiError(null);
     try {
-      const formData = new FormData();
-      formData.append("perkName", editForm.perkName);
-      formData.append("contentType", editForm.contentType);
-      formData.append("description", editForm.description || "");
-      
-      if (editForm.perkCategoryId) {
-        formData.append("perkCategoryId", editForm.perkCategoryId);
-      }
-      if (editForm.campaignId) {
-        formData.append("campaignId", editForm.campaignId);
-      }
-      if (editForm.file) {
-        formData.append("file", editForm.file);
-      }
+      const fields = {
+        perkName: editForm.perkName,
+        contentType: editForm.contentType,
+        description: editForm.description || "",
+      };
+      if (editForm.perkCategoryId)
+        fields.perkCategoryId = editForm.perkCategoryId;
 
-      const updated = await perksAPI.update(id, formData);
+      const updated = await perksAPI.updateJson(id, fields);
       console.log("Update response:", updated);
       await fetchPerks();
+
+      clearEditForm();
       closeEdit();
     } catch (err) {
       console.error("Error updating perk:", err);
-      const friendlyMessage = parseErrorMessage(err);
-      setUiError(friendlyMessage);
+      setUiError(parseErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -183,45 +218,38 @@ export default function PerksLibrary() {
   const openEdit = (perk) => {
     setUiError(null);
     const status = perk.status || "active";
+
     setEditForm({
       perkName: perk.perkName || perk.title || "",
       contentType: perk.contentType || perk.perkType || perk.type || "link",
       description: perk.description || "",
-      perkCategoryId: perk.perkCategoryId || "",
-      campaignId: perk.campaignId || "",
-      status: statusMap[status.toLowerCase()] || 'Active',
+      perkCategoryId: perk.perkCategoryId?._id || perk.perkCategoryId || "",
+      status: statusMap[status.toLowerCase()] || "Active",
       file: null,
     });
+
     setEditingPerk(perk);
   };
 
   const closeEdit = () => {
+    clearEditForm();
     setEditingPerk(null);
-    setEditForm({});
+    setShowCatDrop(false);
   };
 
-  // ─── Get icon for perk type ───
-  const getPerkIcon = (type) => {
-    const key = type?.toLowerCase() || "link";
-    return typeIconMap[key] || Link2;
-  };
+  const getPerkIcon = (type) =>
+    typeIconMap[type?.toLowerCase() || "link"] || Link2;
+  const getPerkBg = (type) =>
+    typeIconBg[type?.toLowerCase() || "link"] || "bg-gray-50";
+  const getPerkColor = (type) =>
+    typeIconColor[type?.toLowerCase() || "link"] || "text-gray-400";
+  const getBadgeClass = (type) =>
+    typeBadge[type?.toLowerCase() || "link"] || "bg-gray-100 text-gray-600";
 
-  const getPerkBg = (type) => {
-    const key = type?.toLowerCase() || "link";
-    return typeIconBg[key] || "bg-gray-50";
-  };
+  const selectedCategory = categories.find(
+    (c) => c._id === editForm.perkCategoryId,
+  );
 
-  const getPerkColor = (type) => {
-    const key = type?.toLowerCase() || "link";
-    return typeIconColor[key] || "text-gray-400";
-  };
-
-  const getBadgeClass = (type) => {
-    const key = type?.toLowerCase() || "link";
-    return typeBadge[key] || "bg-gray-100 text-gray-600";
-  };
-
-  // ─── Loading State ───
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -231,17 +259,8 @@ export default function PerksLibrary() {
     );
   }
 
-  // ─── Error State ───
   if (error && !uiError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <AlertCircle size={40} className="text-red-500 mb-4" />
-        <p className="text-red-500 mb-4 text-center max-w-md">{error}</p>
-        <button onClick={fetchPerks} className="btn-primary">
-          Retry
-        </button>
-      </div>
-    );
+    return <ServerError onRetry={fetchPerks} />;
   }
 
   return (
@@ -250,7 +269,7 @@ export default function PerksLibrary() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Perks Library</h1>
           <p className="text-gray-500 text-sm">
-            Hey Jenny 👋, Reusable exclusive content for your fans
+            Reusable exclusive content for your fans
           </p>
         </div>
         <button
@@ -261,13 +280,12 @@ export default function PerksLibrary() {
         </button>
       </div>
 
-      {/* ─── Professional UI Error Display ─── */}
       {uiError && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3">
           <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
           <div className="flex-1">
             <p className="text-sm font-medium">{uiError}</p>
-            <button 
+            <button
               onClick={() => setUiError(null)}
               className="text-xs text-red-600 hover:text-red-800 mt-1 font-medium"
             >
@@ -289,26 +307,20 @@ export default function PerksLibrary() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {perks.map((perk) => {
             const id = perk._id || perk.id;
-            const perkType = perk.contentType || perk.perkType || perk.type || "link";
+            const perkType =
+              perk.contentType || perk.perkType || perk.type || "link";
             const Icon = getPerkIcon(perkType);
-            const iconBg = getPerkBg(perkType);
-            const iconColor = getPerkColor(perkType);
-            const badgeClass = getBadgeClass(perkType);
             const status = perk.status || "active";
             const isActive = status.toLowerCase() === "active";
-            const displayStatus = statusMap[status.toLowerCase()] || 'Active';
-            const campaigns = perk.campaigns || [];
+            const displayStatus = statusMap[status.toLowerCase()] || "Active";
 
             return (
-              <div
-                key={id}
-                className="card hover:shadow-sm transition-all"
-              >
+              <div key={id} className="card hover:shadow-sm transition-all">
                 <div className="flex items-start justify-between mb-3">
                   <div
-                    className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center`}
+                    className={`w-10 h-10 ${getPerkBg(perkType)} rounded-xl flex items-center justify-center`}
                   >
-                    <Icon size={18} className={iconColor} />
+                    <Icon size={18} className={getPerkColor(perkType)} />
                   </div>
                   <div className="flex gap-1">
                     <button
@@ -318,7 +330,9 @@ export default function PerksLibrary() {
                       <Pencil size={13} className="text-primary" />
                     </button>
                     <button
-                      onClick={() => confirmDelete(id, perk.perkName || perk.title)}
+                      onClick={() =>
+                        confirmDelete(id, perk.perkName || perk.title)
+                      }
                       className="p-1.5 hover:bg-red-50 rounded-lg"
                     >
                       <Trash2 size={13} className="text-red-400" />
@@ -335,27 +349,21 @@ export default function PerksLibrary() {
                   </p>
                 )}
                 <span
-                  className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mb-3 ${badgeClass}`}
+                  className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mb-3 ${getBadgeClass(perkType)}`}
                 >
                   {perkType.charAt(0).toUpperCase() + perkType.slice(1)}
                 </span>
                 <div className="border-t border-gray-100 pt-3">
-                  <p className="text-xs text-gray-400 mb-1">
-                    Used in campaigns:
+                  <p className="text-xs text-gray-400 mb-1">Category:</p>
+                  <p className="text-xs text-primary">
+                    {perk.perkCategoryId?.name || "Uncategorized"}
                   </p>
-                  {campaigns.length > 0 ? (
-                    campaigns.map((c, index) => (
-                      <p key={index} className="text-xs text-primary">
-                        · {c}
-                      </p>
-                    ))
-                  ) : (
-                    <p className="text-xs text-gray-400">Not linked to any campaign</p>
-                  )}
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-50">
                   <span className="text-xs text-gray-400">
-                    Added {perk.createdAt ? new Date(perk.createdAt).toLocaleDateString() : "—"}
+                    {perk.createdAt
+                      ? new Date(perk.createdAt).toLocaleDateString()
+                      : "—"}
                   </span>
                   {isActive ? (
                     <span className="flex items-center gap-1 text-xs font-medium text-green-600">
@@ -363,7 +371,9 @@ export default function PerksLibrary() {
                       {displayStatus}
                     </span>
                   ) : (
-                    <span className="badge-paused text-xs">{displayStatus}</span>
+                    <span className="badge-paused text-xs">
+                      {displayStatus}
+                    </span>
                   )}
                 </div>
               </div>
@@ -372,7 +382,6 @@ export default function PerksLibrary() {
         </div>
       )}
 
-      {/* ─── Edit Modal ─── */}
       {editingPerk && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6">
@@ -426,10 +435,7 @@ export default function PerksLibrary() {
                 <textarea
                   value={editForm.description}
                   onChange={(e) =>
-                    setEditForm((f) => ({
-                      ...f,
-                      description: e.target.value,
-                    }))
+                    setEditForm((f) => ({ ...f, description: e.target.value }))
                   }
                   className="input-field w-full resize-none h-20"
                   placeholder="Brief description..."
@@ -438,43 +444,47 @@ export default function PerksLibrary() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  Perk Category ID <span className="text-gray-400 text-xs">(optional)</span>
+                  Perk Category
                 </label>
-                <input
-                  value={editForm.perkCategoryId}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, perkCategoryId: e.target.value }))
-                  }
-                  className="input-field w-full"
-                  placeholder="Enter perk category ID..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  Campaign ID <span className="text-gray-400 text-xs">(optional)</span>
-                </label>
-                <input
-                  value={editForm.campaignId}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, campaignId: e.target.value }))
-                  }
-                  className="input-field w-full"
-                  placeholder="Enter campaign ID..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  Upload File <span className="text-gray-400 text-xs">(optional)</span>
-                </label>
-                <input
-                  type="file"
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, file: e.target.files[0] }))
-                  }
-                  className="input-field w-full"
-                />
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowCatDrop((o) => !o)}
+                    disabled={loadingCategories}
+                    className="input-field w-full text-left flex items-center justify-between"
+                  >
+                    <span
+                      className={
+                        selectedCategory ? "text-gray-800" : "text-gray-400"
+                      }
+                    >
+                      {loadingCategories
+                        ? "Loading categories..."
+                        : selectedCategory?.name || "Select a category"}
+                    </span>
+                    <ChevronDown size={15} className="text-gray-400 shrink-0" />
+                  </button>
+                  {showCatDrop && (
+                    <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-48 overflow-y-auto">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat._id}
+                          type="button"
+                          onClick={() => {
+                            setEditForm((f) => ({
+                              ...f,
+                              perkCategoryId: cat._id,
+                            }));
+                            setShowCatDrop(false);
+                          }}
+                          className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                        >
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -509,13 +519,11 @@ export default function PerksLibrary() {
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Saving...
+                    <Loader2 size={18} className="animate-spin" /> Saving...
                   </>
                 ) : (
                   <>
-                    <Save size={18} />
-                    Save Changes
+                    <Save size={18} /> Save Changes
                   </>
                 )}
               </button>
@@ -524,7 +532,6 @@ export default function PerksLibrary() {
         </div>
       )}
 
-      {/* ─── Delete Confirmation Modal ─── */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -538,18 +545,18 @@ export default function PerksLibrary() {
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
-
             <div className="flex justify-center mb-4">
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
                 <Trash2 size={32} className="text-red-500" />
               </div>
             </div>
-
             <p className="text-center text-gray-600 mb-6">
-              Are you sure you want to delete <span className="font-semibold text-gray-900">"{deleteModal.perkName}"</span>? 
-              This action cannot be undone.
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-gray-900">
+                "{deleteModal.perkName}"
+              </span>
+              ? This action cannot be undone.
             </p>
-
             <div className="flex gap-3">
               <button
                 onClick={closeDeleteModal}
@@ -565,13 +572,11 @@ export default function PerksLibrary() {
               >
                 {isDeleting ? (
                   <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Deleting...
+                    <Loader2 size={18} className="animate-spin" /> Deleting...
                   </>
                 ) : (
                   <>
-                    <Trash2 size={16} />
-                    Delete
+                    <Trash2 size={16} /> Delete
                   </>
                 )}
               </button>
