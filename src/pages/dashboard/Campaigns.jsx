@@ -1,8 +1,9 @@
 // src/pages/dashboard/Campaigns.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, CheckCircle, AlertCircle } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import { campaignAPI } from '../../services/apiClient'
 import ServerError from '../../components/ServerError'
 
@@ -19,12 +20,27 @@ export default function Campaigns() {
   const [editingCampaign, setEditingCampaign] = useState(null)
   const [editForm, setEditForm] = useState({})
 
+  // ── Dropdown positioning (mirrors Products.jsx) ──
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
+  const buttonRefs = useRef({})
+
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const [hasNextPage, setHasNextPage] = useState(false)
   const [hasPreviousPage, setHasPreviousPage] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
+
+  // ── Delete confirmation state ──
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    campaignId: null,
+    campaignName: '',
+  })
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // ── Toast state ──
+  const [toast, setToast] = useState(null)
 
   const filters = ['All', 'Active', 'Paused', 'Draft']
 
@@ -33,7 +49,6 @@ export default function Campaigns() {
       setLoading(true)
       setError(null)
       const response = await campaignAPI.getAll(page, PAGE_SIZE)
-      console.log('📦 Campaigns fetched:', response)
       const list = Array.isArray(response.data) ? response.data : (response.data?.campaigns || [])
       setCampaigns(list)
       const pagination = response.pagination || {}
@@ -73,15 +88,50 @@ export default function Campaigns() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter])
 
-  const handleDelete = async (campaignId) => {
-    if (!confirm('Are you sure you want to delete this campaign?')) return
+  // ── Auto-dismiss toast ──
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3500)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  // ── Close dropdown when clicking outside ──
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (openMenu && !e.target.closest('.dropdown-menu') && !e.target.closest('.dropdown-trigger')) {
+        setOpenMenu(null)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [openMenu])
+
+  // ── Delete flow ──
+  const confirmDelete = (id, name) => {
+    setDeleteModal({ isOpen: true, campaignId: id, campaignName: name })
+    setOpenMenu(null)
+  }
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return
+    setDeleteModal({ isOpen: false, campaignId: null, campaignName: '' })
+  }
+
+  const handleDelete = async () => {
+    const { campaignId, campaignName } = deleteModal
+    if (!campaignId) return
+
+    setIsDeleting(true)
     try {
       await campaignAPI.delete(campaignId)
-      fetchCampaigns(currentPage)
-      setOpenMenu(null)
+      await fetchCampaigns(currentPage)
+      setDeleteModal({ isOpen: false, campaignId: null, campaignName: '' })
+      setToast({ type: 'success', message: `"${campaignName}" was deleted.` })
     } catch (err) {
       console.error('❌ Error deleting campaign:', err)
-      alert(err.message || 'Failed to delete campaign')
+      setToast({ type: 'error', message: err.message || 'Failed to delete campaign' })
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -98,7 +148,7 @@ export default function Campaigns() {
 
   const saveEdit = async () => {
     try {
-      const updated = await campaignAPI.update(editingCampaign, {
+      await campaignAPI.update(editingCampaign, {
         campaignName: editForm.name,
         status: editForm.status,
         startDate: editForm.startDate,
@@ -106,10 +156,38 @@ export default function Campaigns() {
       })
       fetchCampaigns(currentPage)
       setEditingCampaign(null)
+      setToast({ type: 'success', message: 'Campaign updated.' })
     } catch (err) {
       console.error('❌ Error updating campaign:', err)
-      alert(err.message || 'Failed to update campaign')
+      setToast({ type: 'error', message: err.message || 'Failed to update campaign' })
     }
+  }
+
+  // ── Dropdown positioning ──
+  const openDropdown = (id, e) => {
+    e?.stopPropagation?.()
+    const target = e?.currentTarget || buttonRefs.current[id]
+
+    if (!target) {
+      setMenuPosition({ top: window.innerHeight / 2 - 50, left: window.innerWidth / 2 - 100 })
+      setOpenMenu(id)
+      return
+    }
+
+    const rect = target.getBoundingClientRect()
+    const dropdownWidth = 176  // w-44 = 11rem = 176px
+    const dropdownHeight = 180 // 4 items × ~40px + padding
+
+    let left = rect.right - dropdownWidth
+    let top = rect.bottom + 4
+
+    if (left < 10) left = 10
+    if (left + dropdownWidth > window.innerWidth - 10) left = window.innerWidth - dropdownWidth - 10
+    if (top + dropdownHeight > window.innerHeight - 10) top = rect.top - dropdownHeight - 4
+    if (top < 10) top = 10
+
+    setMenuPosition({ top, left })
+    setOpenMenu(openMenu === id ? null : id)
   }
 
   if (loading) {
@@ -205,35 +283,14 @@ export default function Campaigns() {
                           <br />
                           <span className="text-gray-400">→ {c.endDate ? new Date(c.endDate).toLocaleDateString() : '—'}</span>
                         </td>
-                        <td className="py-3.5 relative">
-                          <button onClick={() => setOpenMenu(openMenu === id ? null : id)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                        <td className="py-3.5 text-right">
+                          <button
+                            ref={(el) => { buttonRefs.current[id] = el }}
+                            onClick={(e) => openDropdown(id, e)}
+                            className="dropdown-trigger p-1.5 hover:bg-gray-100 rounded-lg inline-flex items-center justify-center"
+                          >
                             <MoreHorizontal size={16} className="text-gray-500" />
                           </button>
-                          {openMenu === id && (
-                            <div className="absolute right-0 top-full bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 w-44">
-                              <MenuBtn
-                                icon={<BarChart2 size={14} />}
-                                label="Analytics"
-                                onClick={() => navigate(`/dashboard/campaigns/${id}/analytics`)}
-                              />
-                              <MenuBtn
-                                icon={<Tag size={14} />}
-                                label="View Tags"
-                                onClick={() => navigate(`/dashboard/tag-groups?campaignId=${id}`)}
-                              />
-                              <MenuBtn
-                                icon={<Pencil size={14} />}
-                                label="Edit Details"
-                                onClick={() => openEdit(c)}
-                              />
-                              <MenuBtn
-                                icon={<Trash2 size={14} />}
-                                label="Delete"
-                                danger
-                                onClick={() => handleDelete(id)}
-                              />
-                            </div>
-                          )}
                         </td>
                       </tr>
                     )
@@ -270,6 +327,7 @@ export default function Campaigns() {
         )}
       </div>
 
+      {/* ── Edit modal ── */}
       {editingCampaign && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditingCampaign(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -327,7 +385,77 @@ export default function Campaigns() {
         </div>
       )}
 
-      {openMenu && <div className="fixed inset-0 z-0" onClick={() => setOpenMenu(null)} />}
+      {/* ── Delete confirmation modal ── */}
+      <ConfirmDialog
+        isOpen={deleteModal.isOpen}
+        onClose={closeDeleteModal}
+        onConfirm={handleDelete}
+        title="Delete Campaign"
+        itemName={deleteModal.campaignName}
+        confirmLabel="Delete"
+        tone="danger"
+        loading={isDeleting}
+      />
+
+      {/* ── Toast ── */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-[1000] px-4 py-3 rounded-xl shadow-lg flex items-start gap-2 max-w-sm
+            ${toast.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle size={18} className="shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          )}
+          <span className="text-sm font-medium">{toast.message}</span>
+        </div>
+      )}
+
+      {/* ── Floating dropdown menu (fixed positioning so it escapes the table) ── */}
+      {openMenu !== null && (
+        <>
+          <div className="fixed inset-0 z-[997]" onClick={() => setOpenMenu(null)} />
+          <div
+            className="dropdown-menu fixed bg-white border border-gray-200 rounded-xl shadow-lg z-[999] py-1 w-44"
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+          >
+            <MenuBtn
+              icon={<BarChart2 size={14} />}
+              label="Analytics"
+              onClick={() => {
+                setOpenMenu(null)
+                navigate(`/dashboard/campaigns/${openMenu}/analytics`)
+              }}
+            />
+            <MenuBtn
+              icon={<Tag size={14} />}
+              label="View Tags"
+              onClick={() => {
+                setOpenMenu(null)
+                navigate(`/dashboard/tag-groups?campaignId=${openMenu}`)
+              }}
+            />
+            <MenuBtn
+              icon={<Pencil size={14} />}
+              label="Edit Details"
+              onClick={() => {
+                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
+                if (campaign) openEdit(campaign)
+              }}
+            />
+            <MenuBtn
+              icon={<Trash2 size={14} />}
+              label="Delete"
+              danger
+              onClick={() => {
+                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
+                if (campaign) confirmDelete(openMenu, campaign.campaignName || campaign.name)
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { Plus, Search, MoreHorizontal, Pencil, Trash2, Loader2, AlertCircle, Pac
 import EmptyState from '../../components/EmptyState'
 import { productAPI } from '../../services/apiClient'
 import ServerError from '../../components/ServerError'
+import { useAuth } from '../../context/AuthContext'
 
 const PAGE_SIZE = 20
 
@@ -34,6 +35,7 @@ function parseErrorMessage(error) {
 
 export default function Products() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -74,7 +76,6 @@ export default function Products() {
       'tshirt': 'T-Shirt',
       't-shirt': 'T-Shirt',
       't shirt': 'T-Shirt',
-      't-shirt': 'T-Shirt',
       'hoodie': 'Hoodie',
       'hoody': 'Hoodie',
       'cap': 'Cap',
@@ -382,12 +383,22 @@ export default function Products() {
     return <ServerError onRetry={() => fetchProducts(currentPage)} />
   }
 
+  // Get the user's first name for the greeting
+  const getUserName = () => {
+    if (user?.firstName) return user.firstName
+    if (user?.name) return user.name.split(' ')[0]
+    if (user?.email) return user.email.split('@')[0]
+    return 'User'
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
-          <p className="text-gray-500 text-sm">Hey Jenny 😊, Manage your merch & NFC-linked items</p>
+          <p className="text-gray-500 text-sm">
+            Hey {getUserName()} 👋, Manage your merch & NFC-linked items
+          </p>
         </div>
         <button onClick={() => navigate('/dashboard/products/add')} className="btn-primary w-auto px-5">
           <Plus size={16} /> Add Product

@@ -8,31 +8,56 @@ import {
   getOwnerToken,
   setTapToken,
   setOwnerToken,
+  getTapToken,
   readTapToken,
   readOwnerToken,
   readTapOutcome,
   TAP_OUTCOME,
+  getDeviceInfo,
 } from "../../services/apiClient";
-import { getDeviceInfo } from "../../utils/getDeviceInfo";
 
 function parseErrorMessage(error) {
-  const message = error?.message || "";
-  if (message.includes("Cannot read properties of null") || message.includes("Tag not found")) {
+  const message = (error?.message || "").toLowerCase();
+  const code = error?.code || "";
+
+  if (
+    code === "FAN_SESSION_EXPIRED" ||
+    message.includes("jwt expired") ||
+    message.includes("token expired") ||
+    message.includes("session expired") ||
+    message.includes("session has ended")
+  ) {
+    return "Your tap session has ended. Tap your merch again to restart.";
+  }
+
+  if (
+    message.includes("cannot read properties of null") ||
+    message.includes("tag not found")
+  ) {
     return "We couldn't find this tag. Please tap your merch again.";
   }
-  if (message.includes("Invalid ObjectId") || message.includes("404") || message.includes("not found")) {
+
+  if (
+    message.includes("invalid objectid") ||
+    message.includes("404") ||
+    message.includes("not found")
+  ) {
     return "We couldn't find this tag. It may not be registered yet — try again, or contact the seller.";
   }
+
   if (message.includes("claimed") || message.includes("belongs to another")) {
     return "Hold up! This merch belongs to another user.";
   }
-  if (message.includes("Network")) {
+
+  if (message.includes("network") || message.includes("fetch failed")) {
     return "No connection. Check your internet and tap again.";
   }
-  if (message.includes("timed out")) {
+
+  if (message.includes("timed out") || message.includes("timeout")) {
     return "That took too long. Tap again to retry.";
   }
-  return message || "Something went wrong reading your merch. Please tap again.";
+
+  return "Something went wrong reading your merch. Please tap again.";
 }
 
 export default function TapEntry() {
@@ -48,29 +73,43 @@ export default function TapEntry() {
     setLoading(true);
     setError(null);
 
+    const ownerToken = getOwnerToken();
+    const tapToken = getTapToken();
+    if (ownerToken && ownerToken === tapToken) {
+      localStorage.removeItem("ownerToken");
+    }
+
     try {
-      // ✅ Get device info (coordinates + IP) before firing the tap
       const deviceInfo = await getDeviceInfo();
       console.log("📍 Device info:", deviceInfo);
 
       const response = await tapAPI.tap(tagId, {
         ownerToken: getOwnerToken() || undefined,
 
-        deviceType: /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "ios" : /Mobi|Android/i.test(navigator.userAgent) ? "android" : "web",
+        deviceType: /iPhone|iPad|iPod/i.test(navigator.userAgent)
+          ? "ios"
+          : /Mobi|Android/i.test(navigator.userAgent)
+            ? "android"
+            : "web",
 
         location: {
           country: deviceInfo.country || "Unknown",
           state: deviceInfo.state || "Unknown",
           city: deviceInfo.city || "Unknown",
+          ...(deviceInfo.ip && { ip: deviceInfo.ip }),
+          ...(deviceInfo.latitude != null && { latitude: deviceInfo.latitude }),
+          ...(deviceInfo.longitude != null && { longitude: deviceInfo.longitude }),
+          ...(deviceInfo.accuracy != null && { accuracy: deviceInfo.accuracy }),
         },
       });
-      console.log("📲 Tap response:", response);
 
-      // ✅ Save tapToken and ownerToken
-      const tapToken = readTapToken(response);
-      if (tapToken) {
-        setTapToken(tapToken);
-        console.log("✅ TapToken saved:", tapToken);
+      const newTapToken = readTapToken(response);
+      const ownerTokenFromResp = readOwnerToken(response);
+      const outcome = readTapOutcome(response);
+
+      if (newTapToken) {
+        setTapToken(newTapToken);
+        console.log("✅ TapToken saved:", newTapToken);
       } else {
         console.error("❌ No tapToken in response:", response);
         setError("Could not get a valid token. Please tap again.");
@@ -78,11 +117,7 @@ export default function TapEntry() {
         return;
       }
 
-      const ownerToken = readOwnerToken(response);
-      if (ownerToken) setOwnerToken(ownerToken);
-
-      // ✅ Determine outcome and redirect correctly
-      const outcome = readTapOutcome(response);
+      if (ownerTokenFromResp) setOwnerToken(ownerTokenFromResp);
 
       if (outcome === TAP_OUTCOME.RETURNING) {
         console.log("✅ RETURNING - Going to perks");
@@ -92,18 +127,36 @@ export default function TapEntry() {
 
       if (outcome === TAP_OUTCOME.CLAIMED) {
         console.log("🚫 CLAIMED - Going to claimed page");
-        navigate("/fan/claimed", { replace: true, state: { tagId } });
+        navigate("/fan/claimed", {
+          replace: true,
+          state: {
+            tagId,
+            ownerFirstName: response?.ownerFirstName || null,
+            socials: response?.socials || null,
+          },
+        });
         return;
       }
 
-      // ✅ Fresh tap (default) - Go to activation
       console.log("🆕 FRESH - Going to activation");
       navigate("/fan/activate", { replace: true, state: { tagId } });
     } catch (err) {
       console.error("❌ Tap failed:", err);
 
-      if (err?.status === 403 || err?.message?.includes("claimed") || err?.message?.includes("belongs to another")) {
-        navigate("/fan/claimed", { replace: true, state: { tagId } });
+      if (
+        err?.status === 403 ||
+        err?.message?.includes("claimed") ||
+        err?.message?.includes("belongs to another")
+      ) {
+        // Pass owner name + artist socials to the claimed page
+        navigate("/fan/claimed", {
+          replace: true,
+          state: {
+            tagId,
+            ownerFirstName: err?.ownerFirstName || null,
+            socials: err?.socials || null,
+          },
+        });
         return;
       }
 
@@ -129,7 +182,9 @@ export default function TapEntry() {
           </div>
           <Loader2 size={24} className="text-primary animate-spin mb-3" />
           <p className="font-bold text-gray-900">Reading your merch…</p>
-          <p className="text-sm text-gray-500 mt-1">Hold tight, this only takes a second.</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Hold tight, this only takes a second.
+          </p>
         </div>
       </MobileShell>
     );
@@ -142,13 +197,12 @@ export default function TapEntry() {
           <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-5">
             <AlertCircle size={28} className="text-red-500" />
           </div>
-          <h1 className="text-2xl font-black text-gray-900 mb-2">Couldn't read that tap</h1>
+          <h1 className="text-2xl font-black text-gray-900 mb-2">
+            Couldn't read that tap
+          </h1>
           <p className="text-sm text-gray-600 mb-8 leading-relaxed">{error}</p>
           <button
-            onClick={() => {
-              hasTapped.current = true;
-              runTap();
-            }}
+            onClick={runTap}
             className="btn-primary rounded-full py-4 text-base font-bold w-full"
           >
             Try again

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+// src/pages/fan/PerksLanding.jsx
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MobileShell from '../../components/MobileShell'
 import {
@@ -13,76 +14,87 @@ import {
   Gift,
 } from 'lucide-react'
 import { tapAPI, getTapToken, getOwnerToken } from '../../services/apiClient'
+import CampaignPageRenderer, { REVEAL_PERKS_EVENT } from './CampaignPageRenderer'
 
-// Maps the perk's contentType (backend enum: audio | video | image | link |
-// document) onto the existing detail screens and their visual treatment.
-// Anything unrecognised falls back to the link preset rather than rendering a
-// broken card.
 const PERK_PRESENTATION = {
-  video: {
-    label: 'Exclusive',
-    cta: 'Watch',
-    route: '/fan/perks/video',
-    icon: Video,
-    iconBg: 'bg-red-50',
-    iconColor: 'text-red-400',
-  },
-  audio: {
-    label: 'Audio',
-    cta: 'Listen',
-    route: '/fan/perks/audio',
-    icon: Music,
-    iconBg: 'bg-yellow-50',
-    iconColor: 'text-yellow-500',
-  },
-  image: {
-    label: 'Image',
-    cta: 'View',
-    route: '/fan/perks/image',
-    icon: ImageIcon,
-    iconBg: 'bg-blue-50',
-    iconColor: 'text-blue-400',
-  },
-  document: {
-    label: 'Document',
-    cta: 'Open',
-    route: '/fan/perks/document',
-    icon: FileText,
-    iconBg: 'bg-green-50',
-    iconColor: 'text-green-500',
-  },
-  link: {
-    label: 'Link',
-    cta: 'Get Link',
-    route: '/fan/perks/link',
-    icon: Link2,
-    iconBg: 'bg-purple-50',
-    iconColor: 'text-purple-400',
-  },
+  video: { label: 'Exclusive', cta: 'Watch', route: '/fan/perks/video', icon: Video, iconBg: 'bg-red-50', iconColor: 'text-red-400' },
+  audio: { label: 'Audio', cta: 'Listen', route: '/fan/perks/audio', icon: Music, iconBg: 'bg-yellow-50', iconColor: 'text-yellow-500' },
+  image: { label: 'Image', cta: 'View', route: '/fan/perks/image', icon: ImageIcon, iconBg: 'bg-blue-50', iconColor: 'text-blue-400' },
+  document: { label: 'Document', cta: 'Open', route: '/fan/perks/document', icon: FileText, iconBg: 'bg-green-50', iconColor: 'text-green-500' },
+  link: { label: 'Link', cta: 'Get Link', route: '/fan/perks/link', icon: Link2, iconBg: 'bg-purple-50', iconColor: 'text-purple-400' },
 }
 
 const presentationFor = (contentType) =>
   PERK_PRESENTATION[(contentType || '').toLowerCase()] || PERK_PRESENTATION.link
 
-function parseErrorMessage(error) {
-  const message = error?.message || ''
-  if (message.includes('Tag not found') || message.includes('does not belong')) {
-    return "This merch isn't registered to you. Tap your own item to see its perks."
+function classifyError(error) {
+  const message = (error?.message || '').toLowerCase()
+  const code = error?.code || ''
+
+  if (code === 'FAN_SESSION_EXPIRED' ||
+      message.includes('session has ended') ||
+      message.includes('session expired') ||
+      message.includes('jwt expired') ||
+      message.includes('token expired')) {
+    return {
+      kind: 'session_expired',
+      title: 'Tap your merch again',
+      body: "Your session has ended. Hold your phone near the NFC tag on your item to pick up where you left off.",
+    }
   }
-  if (message.includes('Invalid tap token') || message.includes('tap token')) {
-    return 'Your session expired. Tap your merch again to unlock your perks.'
+
+  if (code === 'FAN_UNAUTHORIZED' ||
+      message.includes('invalid tap token') ||
+      message.includes('tap token')) {
+    return {
+      kind: 'unauthorized',
+      title: 'Tap your merch again',
+      body: "We couldn't verify this tap. Hold your phone near the NFC tag on your item to continue.",
+    }
   }
-  if (message.includes('Network')) {
-    return 'No connection. Check your internet and try again.'
+
+  if (message.includes('owner token')) {
+    return {
+      kind: 'owner_missing',
+      title: 'Tap your merch again',
+      body: "This merch isn't linked to this device. Hold your phone near the NFC tag to unlock your perks.",
+    }
   }
-  if (message.includes('timed out')) {
-    return 'That took too long. Please try again.'
+
+  if (message.includes('tag not found') || message.includes('does not belong')) {
+    return {
+      kind: 'not_found',
+      title: "Couldn't find this merch",
+      body: "This merch isn't registered to you. Tap your own item to see its perks.",
+    }
   }
-  return message || "We couldn't load your perks. Please try again."
+
+  if (message.includes('network') || message.includes('fetch failed') || message.includes("couldn't reach")) {
+    return {
+      kind: 'network',
+      title: 'Connection problem',
+      body: "We couldn't reach the server. Check your internet and try again.",
+      recoverable: true,
+    }
+  }
+
+  if (message.includes('timed out') || message.includes('timeout')) {
+    return {
+      kind: 'timeout',
+      title: 'That took too long',
+      body: 'Please try again in a moment.',
+      recoverable: true,
+    }
+  }
+
+  return {
+    kind: 'unknown',
+    title: 'Something went wrong',
+    body: "We couldn't load your perks. Please try again.",
+    recoverable: true,
+  }
 }
 
-// Shared empty/blocked layout so the several "can't show perks yet" states look
-// consistent instead of each inventing its own markup.
 function FanNotice({ icon: Icon, tone = 'primary', title, body, action }) {
   const tones = {
     primary: { bg: 'bg-primary/10', fg: 'text-primary' },
@@ -104,47 +116,87 @@ function FanNotice({ icon: Icon, tone = 'primary', title, body, action }) {
   )
 }
 
+function parseResponse(response) {
+  const data = response?.data
+
+  if (Array.isArray(data)) {
+    return { campaign: null, resources: data }
+  }
+
+  if (data && typeof data === 'object') {
+    const resources =
+      Array.isArray(data.resources) ? data.resources
+      : Array.isArray(data.campaignPerks) ? data.campaignPerks
+      : []
+
+    const campaign = data.campaign || null
+
+    return {
+      campaign: campaign
+        ? {
+            campaignId: campaign.campaignId,
+            campaignName: campaign.campaignName,
+            pageStructure: campaign.pageStructure || null,
+          }
+        : null,
+      resources,
+    }
+  }
+
+  return { campaign: null, resources: [] }
+}
+
+// A "gating button" is a Button block with no URL (or #perks). If one
+// exists, we hide the perks until the fan taps it.
+function findGatingButton(pageStructure) {
+  const blocks = pageStructure?.blocks
+  if (!Array.isArray(blocks)) return null
+  return (
+    blocks.find((b) => {
+      if (b.type !== 'Button') return false
+      const url = (b.meta?.url || '').trim()
+      return !url || url === '#perks'
+    }) || null
+  )
+}
+
 export default function PerksLanding() {
   const navigate = useNavigate()
 
   const [resources, setResources] = useState([])
+  const [campaign, setCampaign] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [errorInfo, setErrorInfo] = useState(null)
+
+  const [perksRevealed, setPerksRevealed] = useState(false)
+  const perksRef = useRef(null)
+  const hasAutoRevealed = useRef(false)
 
   const tapToken = getTapToken()
   const ownerToken = getOwnerToken()
-
-  // Set during activation so the greeting can be personal without an extra
-  // profile request — this endpoint doesn't return the fan.
   const firstName = localStorage.getItem('fanFirstName')
 
   const fetchResources = async () => {
     try {
       setLoading(true)
-      setError(null)
+      setErrorInfo(null)
 
       const response = await tapAPI.getCampaignResources({ tapToken, ownerToken })
-      console.log('🎁 Campaign resources fetched:', response)
+      console.log('🎁 Campaign page response:', response)
 
-      // Backend returns a flat array under `data`, but stay defensive — other
-      // endpoints in this API have nested their lists a level deeper.
-      const list = Array.isArray(response.data)
-        ? response.data
-        : response.data?.resources || response.data?.campaignPerks || []
+      const { campaign: camp, resources: list } = parseResponse(response)
 
+      setCampaign(camp)
       setResources(list)
     } catch (err) {
       console.error('❌ Error fetching campaign resources:', err)
-      setError(parseErrorMessage(err))
+      setErrorInfo(classifyError(err))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    // Both tokens are mandatory query params on this endpoint, and the
-    // controller dereferences the decoded owner without a guard — calling it
-    // without them produces a 500 rather than a useful message. Check first.
     if (!tapToken || !ownerToken) {
       setLoading(false)
       return
@@ -153,14 +205,39 @@ export default function PerksLanding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tapToken, ownerToken])
 
+  // ── Listen for the reveal event from CampaignPageRenderer ──
+  useEffect(() => {
+    const handler = () => setPerksRevealed(true)
+    window.addEventListener(REVEAL_PERKS_EVENT, handler)
+    return () => window.removeEventListener(REVEAL_PERKS_EVENT, handler)
+  }, [])
+
+  // ── Decide whether perks are gated ──
+  const gatingButton = useMemo(
+    () => findGatingButton(campaign?.pageStructure),
+    [campaign]
+  )
+
+  // If there's no gating button, always show perks (fallback rule).
+  const perksVisible = !gatingButton || perksRevealed
+
+  // ── On reveal, smooth-scroll to the perks section and trigger the fade ──
+  useEffect(() => {
+    if (!perksVisible) return
+    if (hasAutoRevealed.current) return
+    hasAutoRevealed.current = true
+
+    // Wait one frame for the DOM to mount the perks wrapper, then scroll
+    const id = requestAnimationFrame(() => {
+      perksRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [perksVisible])
+
   const openPerk = (resource) => {
-    // perkId is populated on the list endpoint, but can come back as a bare
-    // ObjectId string elsewhere — guard so a string doesn't blow up on access.
     const perk = typeof resource.perkId === 'object' ? resource.perkId : null
     const { route } = presentationFor(perk?.contentType)
 
-    // The detail screens currently read their content from the query string
-    // (see LinkPerk), so pass it through in the same shape.
     const params = new URLSearchParams()
     if (perk?.perkName) params.set('title', perk.perkName)
     if (perk?.description) params.set('desc', perk.description)
@@ -170,7 +247,7 @@ export default function PerksLanding() {
     navigate(`${route}?${params.toString()}`)
   }
 
-  // ─── Never tapped / session gone ───
+  // ── Not tapped yet
   if (!tapToken) {
     return (
       <FanNotice
@@ -181,18 +258,7 @@ export default function PerksLanding() {
     )
   }
 
-  // ─── Tapped, but this device isn't linked to a fan yet ───
-  if (!ownerToken) {
-    return (
-      <FanNotice
-        icon={Nfc}
-        title="Tap again to unlock"
-        body="We need to recognise your device before showing your perks. Hold your phone near the NFC tag once more."
-      />
-    )
-  }
-
-  // ─── Loading ───
+  // ── Loading
   if (loading) {
     return (
       <MobileShell>
@@ -204,28 +270,39 @@ export default function PerksLanding() {
     )
   }
 
-  // ─── Error ───
-  if (error) {
+  // ── Error
+  if (errorInfo) {
+    const canRetry = errorInfo.recoverable === true
+    const isSessionError =
+      errorInfo.kind === 'session_expired' ||
+      errorInfo.kind === 'unauthorized' ||
+      errorInfo.kind === 'owner_missing'
+
     return (
       <FanNotice
-        icon={AlertCircle}
-        tone="red"
-        title="Couldn't load your perks"
-        body={error}
+        icon={isSessionError ? Nfc : AlertCircle}
+        tone={isSessionError ? 'primary' : 'red'}
+        title={errorInfo.title}
+        body={errorInfo.body}
         action={
-          <button
-            onClick={fetchResources}
-            className="btn-primary rounded-full py-4 text-base font-bold w-full"
-          >
-            Try again
-          </button>
+          canRetry ? (
+            <button
+              onClick={fetchResources}
+              className="btn-primary rounded-full py-4 text-base font-bold w-full"
+            >
+              Try again
+            </button>
+          ) : null
         }
       />
     )
   }
 
-  // ─── Empty ───
-  if (resources.length === 0) {
+  const hasDesign = Array.isArray(campaign?.pageStructure?.blocks)
+    && campaign.pageStructure.blocks.length > 0
+
+  // ── Truly empty (no design AND no perks)
+  if (resources.length === 0 && !hasDesign) {
     return (
       <FanNotice
         icon={Gift}
@@ -235,54 +312,73 @@ export default function PerksLanding() {
     )
   }
 
-  // ─── Perks list ───
   return (
     <MobileShell>
-      <div className="flex items-center justify-between mb-4 pt-2">
-        <div>
-          <p className="font-bold text-gray-900">
-            {firstName ? `Hey ${firstName} 👋 Welcome back` : 'Welcome back 👋'}
-          </p>
-          <p className="text-sm text-gray-500">
-            Your Perks ({resources.length} Unlocked)
-          </p>
+      {hasDesign && (
+        <div className="-mx-4 -mt-4 mb-4">
+          <CampaignPageRenderer pageStructure={campaign.pageStructure} />
         </div>
-      </div>
+      )}
 
-      <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-        Exclusive content unlocked for this piece. Thank you for being part of the movement.
-      </p>
-
-      <div className="space-y-3">
-        {resources.map((resource) => {
-          const perk = typeof resource.perkId === 'object' ? resource.perkId : null
-          const { label, cta, icon: Icon, iconBg, iconColor } = presentationFor(
-            perk?.contentType
-          )
-
-          return (
-            <button
-              key={resource._id}
-              onClick={() => openPerk(resource)}
-              className="w-full card text-left hover:shadow-md transition-shadow relative"
-            >
-              <div
-                className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center mb-3`}
-              >
-                <Icon size={18} className={iconColor} />
-              </div>
-              <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-              <p className="font-bold text-gray-900 mb-2">
-                {perk?.perkName || 'Exclusive perk'}
+      {perksVisible && (
+        <div
+          id="perks"
+          ref={perksRef}
+          className={perksRevealed ? 'perks-reveal' : ''}
+        >
+          <div className="flex items-center justify-between mb-4 pt-2">
+            <div>
+              <p className="font-bold text-gray-900">
+                {firstName ? `Hey ${firstName} 👋 Welcome back` : 'Welcome back 👋'}
               </p>
-              {perk?.description && (
-                <p className="text-sm text-gray-500 mb-2 line-clamp-2">{perk.description}</p>
-              )}
-              <span className="text-primary font-semibold text-sm">{cta} →</span>
-            </button>
-          )
-        })}
-      </div>
+              <p className="text-sm text-gray-500">
+                Your Perks ({resources.length} Unlocked)
+              </p>
+            </div>
+          </div>
+
+          <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+            Exclusive content unlocked for this piece. Thank you for being part of the movement.
+          </p>
+
+          {resources.length > 0 ? (
+            <div className="space-y-3">
+              {resources.map((resource) => {
+                const perk = typeof resource.perkId === 'object' ? resource.perkId : null
+                const { label, cta, icon: Icon, iconBg, iconColor } = presentationFor(
+                  perk?.contentType
+                )
+
+                return (
+                  <button
+                    key={resource._id}
+                    onClick={() => openPerk(resource)}
+                    className="w-full card text-left hover:shadow-md transition-shadow relative"
+                  >
+                    <div className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center mb-3`}>
+                      <Icon size={18} className={iconColor} />
+                    </div>
+                    <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                    <p className="font-bold text-gray-900 mb-2">
+                      {perk?.perkName || 'Exclusive perk'}
+                    </p>
+                    {perk?.description && (
+                      <p className="text-sm text-gray-500 mb-2 line-clamp-2">{perk.description}</p>
+                    )}
+                    <span className="text-primary font-semibold text-sm">{cta} →</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl bg-gray-50 p-6 text-center">
+              <p className="text-sm text-gray-500">
+                No perks have been added to this drop yet.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </MobileShell>
   )
 }

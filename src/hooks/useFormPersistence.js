@@ -4,18 +4,38 @@ import { useState, useEffect, useCallback } from 'react'
 /**
  * Persists form state to sessionStorage so it survives refresh,
  * but clears when the tab is closed.
- * 
+ *
+ * Handles objects and arrays. Objects are merged with defaults;
+ * arrays are returned as-is (they don't have meaningful "defaults to merge").
+ *
  * @param {string} storageKey - Unique key to identify this form
- * @param {object} initialData - Default form data
- * @returns {[object, function, function]} - [formData, setFormData, clearSavedForm]
+ * @param {object|array} initialData - Default form data
+ * @returns {[object|array, function, function, function]} - [formData, setFormData, clearSavedForm, hasSavedData]
  */
 export function useFormPersistence(storageKey, initialData) {
   const [formData, setFormDataState] = useState(() => {
-    // Try to load from sessionStorage (survives refresh, but not new tabs)
     try {
       const saved = sessionStorage.getItem(`form_${storageKey}`)
       if (saved) {
-        return { ...initialData, ...JSON.parse(saved) }
+        const parsed = JSON.parse(saved)
+
+        // Arrays: return as-is (no spread — spreading arrays gives an object
+        // with numeric keys, which breaks .map and other array methods)
+        if (Array.isArray(initialData)) {
+          return Array.isArray(parsed) ? parsed : initialData
+        }
+
+        // Plain objects: merge defaults with saved so new fields get defaults
+        if (
+          initialData &&
+          typeof initialData === 'object' &&
+          !Array.isArray(initialData)
+        ) {
+          return { ...initialData, ...parsed }
+        }
+
+        // Primitives (string, number, boolean): return saved directly
+        return parsed
       }
     } catch (err) {
       console.error(`Failed to load saved form for "${storageKey}":`, err)
@@ -34,7 +54,7 @@ export function useFormPersistence(storageKey, initialData) {
 
   // Set form data (supports both direct value and updater function)
   const setFormData = useCallback((updater) => {
-    setFormDataState(prev => {
+    setFormDataState((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater
       return next
     })

@@ -22,12 +22,12 @@ const contentTypes = [
 // GET /admin/perks/categories is intermittently flaky on the backend
 // (confirmed via curl — same failure outside the browser entirely, not a
 // frontend bug). These are real, confirmed category IDs to fall back to
-// so the form stays usable when the live fetch fails. Shown with a
-// shortened ID since two entries share the same name ("Premium Access").
+// so the form stays usable when the live fetch fails.
+// FIXED: Removed duplicate "Premium Access" and replaced with "VIP Access"
 const KNOWN_CATEGORIES = [
   { _id: "6a47f7bd57683e966000296e", name: "Classic Access" },
   { _id: "6a47dff4b09ae7642a078972", name: "Premium Access" },
-  { _id: "6a494f1aa4164eab48bf52aa", name: "Premium Access" },
+  { _id: "6a494f1aa4164eab48bf52aa", name: "VIP Access" },
 ];
 
 function parseErrorMessage(error) {
@@ -84,7 +84,14 @@ export default function UploadPerk() {
       try {
         const res = await perksAPI.getCategories();
         const live = res.data || [];
-        setCategories(live.length > 0 ? live : KNOWN_CATEGORIES);
+        
+        // ─── FIXED: Deduplicate categories by name ───
+        const deduped = live.filter((cat, index, self) =>
+          index === self.findIndex(c => c.name === cat.name)
+        );
+        
+        console.log('📋 Categories loaded:', deduped);
+        setCategories(deduped.length > 0 ? deduped : KNOWN_CATEGORIES);
       } catch (err) {
         console.error(
           "Failed to load perk categories, using known fallback:",
@@ -110,49 +117,48 @@ export default function UploadPerk() {
   };
 
   const handleSubmit = async () => {
-    setFieldError("");
-    setUiError(null);
+  setFieldError("");
+  setUiError(null);
 
-    if (!formData.perkName.trim()) {
-      setFieldError("Perk name is required");
-      return;
-    }
-    if (!formData.selectedCategory) {
-      setFieldError("Please choose a perk category");
-      return;
-    }
-    if (!formData.selectedType) {
-      setFieldError("Please choose a content type");
-      return;
-    }
+  if (!formData.perkName.trim()) {
+    setFieldError("Perk name is required");
+    return;
+  }
+  if (!formData.selectedCategory) {
+    setFieldError("Please choose a perk category");
+    return;
+  }
+  if (!formData.selectedType) {
+    setFieldError("Please choose a content type");
+    return;
+  }
 
-    setSubmitting(true);
-    try {
-      const payload = {
-        perkName: formData.perkName.trim(),
-        perkCategoryId: formData.selectedCategory._id,
-        contentType: formData.selectedType.value,
-        // POST /perks only accepts JSON with a fileUrl string — confirmed
-        // in Swagger (no multipart option here, unlike PATCH). No real
-        // upload endpoint exists yet, so this is a placeholder.
-        fileUrl: formData.file
-          ? `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(formData.file.name)}`
-          : "https://placeholder.intelimerch.com/pending-upload/none",
-      };
-      if (formData.description.trim())
-        payload.description = formData.description.trim();
+  setSubmitting(true);
+  try {
+    const payload = {
+      perkName: formData.perkName.trim(),
+      perkCategoryId: formData.selectedCategory._id,
+      contentType: formData.selectedType.value,
+      // POST /perks is JSON-only and requires fileUrl (string).
+      // No upload endpoint exists yet, so this is a placeholder.
+      fileUrl: formData.file
+        ? `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(formData.file.name)}`
+        : "https://placeholder.intelimerch.com/pending-upload/none",
+    };
+    if (formData.description.trim())
+      payload.description = formData.description.trim();
 
-      const response = await perksAPI.create(payload);
-      console.log("✅ Perk created:", response);
-      clearSavedForm(); // ✅ Clear saved form after success
-      navigate("/dashboard/perks");
-    } catch (err) {
-      console.error("Failed to create perk:", err);
-      setUiError(parseErrorMessage(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    const response = await perksAPI.create(payload);
+    console.log("✅ Perk created:", response);
+    clearSavedForm();
+    navigate("/dashboard/perks");
+  } catch (err) {
+    console.error("Failed to create perk:", err);
+    setUiError(parseErrorMessage(err));
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   const handleBack = () => {
     clearSavedForm(); // ✅ Clear when navigating away

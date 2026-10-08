@@ -1,14 +1,34 @@
 // src/pages/dashboard/NewCampaign.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   ArrowLeft, Save, Zap, Type, AlignLeft, Image, Video, Music, Link2,
   LayoutTemplate, Trash2, Copy, ChevronDown, Loader2, AlertCircle,
-  AlertTriangle,
+  AlertTriangle, Palette, GripVertical,
 } from "lucide-react";
 import { campaignAPI } from "../../services/apiClient";
 import { useFormPersistence } from "../../hooks/useFormPersistence";
+import {
+  FONT_FAMILIES,
+  FONT_SIZES,
+  FONT_WEIGHTS,
+  TEXT_ALIGNS,
+  COLOR_SWATCHES,
+  DEFAULT_THEME,
+  defaultBlockStyle,
+  normalizeTheme,
+  normalizeBlockStyle,
+  resolveStyle,
+  styleToCss,
+  styleToClasses,
+  SOCIAL_PLATFORMS,
+  EMPTY_SOCIALS,
+  normalizeSocials,
+} from "../../utils/campaignPageStyles";
 
+// ─────────────────────────────────────────────
+// Block palette
+// ─────────────────────────────────────────────
 const blockTypes = [
   { type: "Header", icon: Type, color: "text-violet-500" },
   { type: "Text", icon: AlignLeft, color: "text-gray-600" },
@@ -19,12 +39,26 @@ const blockTypes = [
   { type: "Footer", icon: LayoutTemplate, color: "text-pink-500" },
 ];
 
+const BLOCK_DEFAULTS = {
+  Header: "New Header",
+  Text: "Add your text here...",
+  Button: "Claim Your Perk",
+  Image: null,
+  Video: null,
+  Audio: null,
+  Footer: "© 2026 · Powered by InteliMerch",
+};
+
 const defaultBlocks = [
-  { id: 1, type: "Header", content: "", meta: {} },
-  { id: 2, type: "Text", content: "", meta: {} },
-  { id: 3, type: "Button", content: "Claim Your Perk", meta: { url: "" } },
+  { id: 1, type: "Header", content: "", meta: {}, style: defaultBlockStyle("Header") },
+  { id: 2, type: "Text", content: "", meta: {}, style: defaultBlockStyle("Text") },
+  { id: 3, type: "Button", content: "Claim Your Perk", meta: { url: "" }, style: defaultBlockStyle("Button") },
+  { id: 4, type: "Video", content: null, meta: {}, style: defaultBlockStyle("Video") },
 ];
 
+// ─────────────────────────────────────────────
+// Publish success modal
+// ─────────────────────────────────────────────
 function PublishSuccessModal({ isOpen, onClose, campaignName, onDone }) {
   if (!isOpen) return null;
   return (
@@ -51,6 +85,9 @@ function PublishSuccessModal({ isOpen, onClose, campaignName, onDone }) {
   );
 }
 
+// ─────────────────────────────────────────────
+// Main editor
+// ─────────────────────────────────────────────
 export default function NewCampaign() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,11 +95,54 @@ export default function NewCampaign() {
   const initialCampaignName = location.state?.campaignName || "New Campaign Page";
 
   const [tab, setTab] = useState("canvas");
-  
-  // ✅ Use useFormPersistence for blocks (survives refresh, clears on navigation away)
-  const [blocks, setBlocks, clearSavedBlocks] = useFormPersistence("artist_campaign_blocks", defaultBlocks);
-  
-  const [editingId, setEditingId] = useState(null);
+
+  const [rawBlocks, setBlocks, clearSavedBlocks] = useFormPersistence(
+    "artist_campaign_blocks",
+    defaultBlocks
+  );
+  const blocks = Array.isArray(rawBlocks) ? rawBlocks : defaultBlocks;
+
+  const [rawTheme, setRawTheme, clearSavedTheme] = useFormPersistence(
+    "artist_campaign_theme",
+    DEFAULT_THEME
+  );
+  const theme = normalizeTheme(
+    rawTheme && typeof rawTheme === "object" && !Array.isArray(rawTheme)
+      ? rawTheme
+      : DEFAULT_THEME
+  );
+
+  const setTheme = (updater) => {
+    setRawTheme(prev => {
+      const safePrev = normalizeTheme(
+        prev && typeof prev === "object" && !Array.isArray(prev) ? prev : DEFAULT_THEME
+      );
+      const next = typeof updater === "function" ? updater(safePrev) : updater;
+      return normalizeTheme(next);
+    });
+  };
+
+  // ── Social links ──
+  const [rawSocials, setRawSocials, clearSavedSocials] = useFormPersistence(
+    "artist_campaign_socials",
+    EMPTY_SOCIALS
+  );
+  const socials = normalizeSocials(
+    rawSocials && typeof rawSocials === "object" && !Array.isArray(rawSocials)
+      ? rawSocials
+      : EMPTY_SOCIALS
+  );
+
+  const updateSocial = (key, value) => {
+    setRawSocials(prev => {
+      const safePrev = normalizeSocials(
+        prev && typeof prev === "object" && !Array.isArray(prev) ? prev : EMPTY_SOCIALS
+      );
+      return { ...safePrev, [key]: value };
+    });
+  };
+
+  const [selectedId, setSelectedId] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
 
@@ -74,6 +154,10 @@ export default function NewCampaign() {
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+  const canvasRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const selectedBlock = blocks.find(b => b.id === selectedId) || null;
 
   useEffect(() => {
     async function loadCampaigns() {
@@ -93,40 +177,75 @@ export default function NewCampaign() {
   const selectedCampaign = campaigns.find(c => (c._id || c.id) === campaignId);
   const campaignName = selectedCampaign?.campaignName || selectedCampaign?.name || initialCampaignName;
 
-  const addBlock = (type) => {
-    const defaults = {
-      Header: "New Header", Text: "Add your text here...", Button: "Click Me",
-      Image: null, Video: null, Audio: null, Footer: "© 2026 · Powered by InteliMerch",
+  useEffect(() => {
+    const handler = (e) => {
+      const insideBlock = e.target.closest("[data-block-id]");
+      const insideSidebar = e.target.closest("[data-sidebar]");
+      if (!insideBlock && !insideSidebar) setSelectedId(null);
     };
-    setBlocks(prev => [...prev, { id: Date.now(), type, content: defaults[type] || "", meta: {} }]);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const addBlock = (type) => {
+    const newBlock = {
+      id: Date.now(),
+      type,
+      content: BLOCK_DEFAULTS[type] || "",
+      meta: type === "Button" ? { url: "" } : {},
+      style: defaultBlockStyle(type),
+    };
+    setBlocks(prev => [...prev, newBlock]);
+    setSelectedId(newBlock.id);
   };
 
   const duplicateBlock = (id) => {
     setBlocks(prev => {
       const idx = prev.findIndex(x => x.id === id);
       if (idx === -1) return prev;
-      const copy = { ...prev[idx], id: Date.now() };
+      const copy = { ...prev[idx], id: Date.now(), style: { ...(prev[idx].style || {}) } };
       const next = [...prev];
       next.splice(idx + 1, 0, copy);
       return next;
     });
   };
 
-  const removeBlock = (id) => setBlocks(prev => prev.filter(x => x.id !== id));
-
-  const updateBlock = (id, field, value) => {
-    if (field === "content") {
-      setBlocks(prev => prev.map(x => x.id === id ? { ...x, content: value } : x));
-    } else {
-      setBlocks(prev => prev.map(x => x.id === id ? { ...x, meta: { ...x.meta, [field]: value } } : x));
-    }
+  const removeBlock = (id) => {
+    setBlocks(prev => prev.filter(x => x.id !== id));
+    if (selectedId === id) setSelectedId(null);
   };
 
-  const onDragStart = (e, id) => { setDraggingId(id); e.dataTransfer.effectAllowed = "move"; };
-  const onDragOver = (e, id) => { e.preventDefault(); if (id !== draggingId) setDragOverId(id); };
+  const updateBlockContent = (id, value) => {
+    setBlocks(prev => prev.map(x => x.id === id ? { ...x, content: value } : x));
+  };
+
+  const updateBlockMeta = (id, key, value) => {
+    setBlocks(prev => prev.map(x =>
+      x.id === id ? { ...x, meta: { ...(x.meta || {}), [key]: value } } : x
+    ));
+  };
+
+  const updateBlockStyle = (id, key, value) => {
+    setBlocks(prev => prev.map(x =>
+      x.id === id ? { ...x, style: { ...(x.style || {}), [key]: value } } : x
+    ));
+  };
+
+  const onDragStart = (e, id) => {
+    setDraggingId(id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const onDragOver = (e, id) => {
+    e.preventDefault();
+    if (id !== draggingId) setDragOverId(id);
+  };
   const onDrop = (e, targetId) => {
     e.preventDefault();
-    if (draggingId === targetId) { setDraggingId(null); setDragOverId(null); return; }
+    if (draggingId === targetId || draggingId == null) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
     setBlocks(prev => {
       const from = prev.findIndex(b => b.id === draggingId);
       const to = prev.findIndex(b => b.id === targetId);
@@ -151,14 +270,22 @@ export default function NewCampaign() {
 
     setPublishing(true);
     try {
-      const pageStructure = { blocks };
+      const pageStructure = {
+        version: 1,
+        theme: normalizeTheme(theme),
+        socials: normalizeSocials(socials),
+        blocks: blocks.map(b => ({
+          ...b,
+          style: normalizeBlockStyle(b.style),
+        })),
+      };
 
       const response = await campaignAPI.createPage(campaignId, { pageStructure });
       console.log("✅ Campaign page created:", response);
-      
-      // ✅ Clear saved blocks after successful publish
+
       clearSavedBlocks();
-      
+      clearSavedTheme();
+      clearSavedSocials();
       setShowSuccessModal(true);
     } catch (err) {
       console.error("❌ Error publishing campaign page:", err);
@@ -169,12 +296,14 @@ export default function NewCampaign() {
   };
 
   const handleSaveDraft = () => {
-    console.log("Draft (local only):", { campaignId, blocks });
+    console.log("Draft (local only):", { campaignId, theme, socials, blocks });
     alert("Draft saved locally — there's no backend draft endpoint yet, so this isn't persisted remotely.");
   };
 
   const handleBack = () => {
-    clearSavedBlocks(); // ✅ Clear when navigating away
+    clearSavedBlocks();
+    clearSavedTheme();
+    clearSavedSocials();
     navigate("/dashboard/campaigns");
   };
 
@@ -194,8 +323,14 @@ export default function NewCampaign() {
   return (
     <>
       <div className="flex -m-8 h-screen overflow-hidden">
-        {/* Left Sidebar */}
-        <div className="w-64 bg-white border-r border-gray-100 flex flex-col shrink-0 overflow-y-auto">
+        {/* ──────────────────────────────
+            LEFT SIDEBAR
+        ────────────────────────────── */}
+        <div
+          data-sidebar
+          ref={sidebarRef}
+          className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0 overflow-y-auto"
+        >
           <div className="p-4 border-b border-gray-100">
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Add Blocks</h3>
             <div className="space-y-1">
@@ -212,7 +347,7 @@ export default function NewCampaign() {
             </div>
           </div>
 
-          <div className="p-4">
+          <div className="p-4 border-b border-gray-100">
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Assign Campaign</h3>
             <div className="relative">
               <button
@@ -220,10 +355,10 @@ export default function NewCampaign() {
                 disabled={loadingCampaigns}
                 className="w-full px-3 py-2 text-sm text-left border border-gray-200 rounded-lg flex items-center justify-between"
               >
-                <span className={campaignId ? "text-gray-800" : "text-gray-400"}>
+                <span className={campaignId ? "text-gray-800 truncate" : "text-gray-400"}>
                   {loadingCampaigns ? "Loading..." : campaignName || "Select Campaign"}
                 </span>
-                <ChevronDown size={13} className="text-gray-400 shrink-0" />
+                <ChevronDown size={13} className="text-gray-400 shrink-0 ml-2" />
               </button>
               {campaignDropOpen && (
                 <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 mt-1 max-h-56 overflow-y-auto">
@@ -247,19 +382,60 @@ export default function NewCampaign() {
               )}
             </div>
           </div>
+
+          {/* ── Social Links ── */}
+          <div className="p-4 border-b border-gray-100">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+              Social Links
+            </h3>
+            <p className="text-[11px] text-gray-400 mb-3">
+              Shown on the "already claimed" page when someone else taps your merch.
+            </p>
+            <div className="space-y-3">
+              {SOCIAL_PLATFORMS.map((platform) => (
+                <div key={platform.key}>
+                  <label
+                    className="text-xs font-medium mb-1.5 block"
+                    style={{ color: platform.brandColor }}
+                  >
+                    {platform.label}
+                  </label>
+                  <input
+                    type="url"
+                    value={socials[platform.key] || ""}
+                    onChange={(e) => updateSocial(platform.key, e.target.value)}
+                    placeholder={platform.placeholder}
+                    className="w-full px-2.5 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Theme OR Block Style panel ── */}
+          {selectedBlock ? (
+            <BlockStylePanel
+              block={selectedBlock}
+              onStyle={(k, v) => updateBlockStyle(selectedBlock.id, k, v)}
+              onClose={() => setSelectedId(null)}
+            />
+          ) : (
+            <CampaignThemePanel theme={theme} setTheme={setTheme} />
+          )}
         </div>
 
-        {/* Main Area */}
+        {/* ──────────────────────────────
+            MAIN — canvas / preview
+        ────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="bg-white border-b border-gray-100 px-6 py-3.5 flex items-center justify-between">
+          <div className="bg-white border-b border-gray-100 px-6 py-3.5 flex items-center justify-between shrink-0">
             <div>
-              <h1 className="text-lg font-bold text-gray-900">New Campaign Page</h1>
-              <p className="text-xs text-gray-400">Drag blocks to reorder · click to edit</p>
+              <h1 className="text-lg font-bold text-gray-900">Campaign Page Editor</h1>
+              <p className="text-xs text-gray-400">
+                Click a block to edit inline · drag <GripVertical size={10} className="inline" /> to reorder
+              </p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all flex items-center gap-2">
-                <Save size={14} /> Save Draft
-              </button>
               <button onClick={handlePublish} disabled={publishing} className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-xl hover:bg-primary/90 transition-all flex items-center gap-2 disabled:opacity-50">
                 {publishing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                 {publishing ? "Publishing..." : "Publish"}
@@ -291,42 +467,39 @@ export default function NewCampaign() {
             </div>
 
             {tab === "canvas" ? (
-              <div className="space-y-2 max-w-2xl">
-                {blocks.map(block => (
-                  <div
-                    key={block.id}
-                    draggable
-                    onDragStart={e => onDragStart(e, block.id)}
-                    onDragOver={e => onDragOver(e, block.id)}
-                    onDrop={e => onDrop(e, block.id)}
-                    onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
-                    className={`border rounded-xl bg-white transition-all select-none
-                      ${editingId === block.id ? "border-primary ring-1 ring-primary/20 shadow-sm" : "border-gray-200 hover:border-gray-300"}
-                      ${dragOverId === block.id && draggingId !== block.id ? "border-primary bg-amber-50/50" : ""}
-                      ${draggingId === block.id ? "opacity-40" : ""}`}
-                  >
-                    <div className="flex items-center justify-between px-4 py-2 bg-gray-50/60 rounded-t-xl border-b border-gray-100">
-                      <span className="text-xs font-bold text-primary uppercase tracking-wide">{block.type}</span>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => setEditingId(editingId === block.id ? null : block.id)} className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-all ${editingId === block.id ? "bg-primary text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-                          {editingId === block.id ? "✓ Done" : "Edit"}
-                        </button>
-                        <button onClick={() => duplicateBlock(block.id)} className="p-1 hover:bg-gray-100 rounded-lg">
-                          <Copy size={12} className="text-gray-400" />
-                        </button>
-                        <button onClick={() => removeBlock(block.id)} className="p-1 hover:bg-red-50 rounded-lg">
-                          <Trash2 size={12} className="text-red-400" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="p-4">
-                      {editingId === block.id
-                        ? <BlockEditor block={block} onChange={updateBlock} onFile={(field, file) => updateBlock(block.id, field, buildDummyUrl(file?.name))} />
-                        : <BlockPreview block={block} onClick={() => setEditingId(block.id)} />}
-                    </div>
+              <div className="max-w-2xl" ref={canvasRef}>
+                <div
+                  className="rounded-2xl p-4 border border-gray-100"
+                  style={{ backgroundColor: theme.bgColor }}
+                >
+                  <div className="space-y-1">
+                    {blocks.map(block => (
+                      <CanvasBlock
+                        key={block.id}
+                        block={block}
+                        theme={theme}
+                        isSelected={selectedId === block.id}
+                        isDragging={draggingId === block.id}
+                        isDragOver={dragOverId === block.id && draggingId !== block.id}
+                        onSelect={() => setSelectedId(block.id)}
+                        onContentChange={(v) => updateBlockContent(block.id, v)}
+                        onMetaChange={(k, v) => updateBlockMeta(block.id, k, v)}
+                        onDuplicate={() => duplicateBlock(block.id)}
+                        onRemove={() => removeBlock(block.id)}
+                        onFile={(field, file) => updateBlockMeta(block.id, field, buildDummyUrl(file?.name))}
+                        onDragStart={(e) => onDragStart(e, block.id)}
+                        onDragOver={(e) => onDragOver(e, block.id)}
+                        onDrop={(e) => onDrop(e, block.id)}
+                        onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                      />
+                    ))}
                   </div>
-                ))}
-                <button onClick={() => addBlock("Text")} className="w-full border-2 border-dashed border-gray-200 rounded-xl py-4 text-sm text-gray-400 hover:border-primary hover:text-primary transition-all">
+                </div>
+
+                <button
+                  onClick={() => addBlock("Text")}
+                  className="mt-4 w-full border-2 border-dashed border-gray-200 rounded-xl py-4 text-sm text-gray-400 hover:border-primary hover:text-primary transition-all"
+                >
                   + Add Block
                 </button>
               </div>
@@ -343,26 +516,15 @@ export default function NewCampaign() {
                     intelimerch.app/{(campaignName || "campaign").toLowerCase().replace(/\s+/g, "-")}
                   </span>
                 </div>
-                <div className="bg-white rounded-b-2xl border border-gray-200 border-t-0 p-5 space-y-4 min-h-64">
+                <div
+                  className="rounded-b-2xl border border-gray-200 border-t-0 p-5 space-y-4 min-h-64"
+                  style={{
+                    backgroundColor: theme.bgColor,
+                    fontFamily: FONT_FAMILIES.find(f => f.value === theme.fontFamily)?.stack,
+                  }}
+                >
                   {blocks.map(block => (
-                    <div key={block.id}>
-                      {block.type === "Header" && <h2 className="text-lg font-bold text-gray-900">{block.content}</h2>}
-                      {block.type === "Text" && <p className="text-sm text-gray-600">{block.content}</p>}
-                      {block.type === "Button" && <button className="px-5 py-3 text-sm font-medium text-white bg-primary rounded-xl w-full">{block.content}</button>}
-                      {block.type === "Video" && (
-                        <div className="h-40 bg-purple-100 rounded-xl flex items-center justify-center text-purple-400 text-sm">▶ Video</div>
-                      )}
-                      {block.type === "Image" && (
-                        <div className="h-32 bg-green-50 rounded-xl flex items-center justify-center text-green-400 text-sm">📷 Image</div>
-                      )}
-                      {block.type === "Audio" && (
-                        <div className="bg-yellow-50 rounded-xl p-3 flex items-center gap-3">
-                          <span className="text-yellow-500">🎵</span>
-                          <span className="text-sm text-gray-700">{block.content || "Audio"}</span>
-                        </div>
-                      )}
-                      {block.type === "Footer" && <p className="text-xs text-gray-400 text-center border-t border-gray-100 pt-3">{block.content}</p>}
-                    </div>
+                    <PreviewBlock key={block.id} block={block} theme={theme} />
                   ))}
                 </div>
               </div>
@@ -381,73 +543,471 @@ export default function NewCampaign() {
   );
 }
 
-function BlockEditor({ block, onChange, onFile }) {
+// ─────────────────────────────────────────────
+// Canvas block — renders live and editable
+// ─────────────────────────────────────────────
+function CanvasBlock({
+  block, theme, isSelected, isDragging, isDragOver,
+  onSelect, onContentChange, onMetaChange,
+  onDuplicate, onRemove, onFile,
+  onDragStart, onDragOver, onDrop, onDragEnd,
+}) {
+  const resolved = resolveStyle(theme, block.style);
+  const css = styleToCss(resolved);
+  const cls = styleToClasses(resolved);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el && block.type === "Text") {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [block.content, block.type]);
+
   return (
-    <div className="space-y-2.5" onClick={e => e.stopPropagation()}>
-      {(block.type === "Header" || block.type === "Footer") && (
-        <input autoFocus value={block.content || ""} onChange={e => onChange(block.id, "content", e.target.value)} className="input-field" placeholder={`${block.type} text...`} />
+    <div
+      data-block-id={block.id}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+      className={`group relative rounded-xl transition-all
+        ${isSelected ? "ring-2 ring-primary ring-offset-2" : "hover:ring-1 hover:ring-gray-200 hover:ring-offset-1"}
+        ${isDragging ? "opacity-40" : ""}
+        ${isDragOver ? "ring-2 ring-amber-400 ring-offset-2" : ""}`}
+    >
+      <div
+        className={`absolute -top-3 left-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-gray-200 shadow-sm text-[10px] font-bold text-gray-500 transition-opacity
+          ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+      >
+        <GripVertical size={10} className="text-gray-300 cursor-grab" />
+        <span className="uppercase tracking-wider">{block.type}</span>
+      </div>
+
+      <div
+        className={`absolute -top-3 right-2 z-10 flex items-center gap-1 transition-opacity
+          ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+      >
+        <button
+          onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
+          className="p-1 rounded-md bg-white border border-gray-200 shadow-sm hover:bg-gray-50"
+          title="Duplicate"
+        >
+          <Copy size={11} className="text-gray-500" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="p-1 rounded-md bg-white border border-gray-200 shadow-sm hover:bg-red-50"
+          title="Delete"
+        >
+          <Trash2 size={11} className="text-red-500" />
+        </button>
+      </div>
+
+      <div className="p-3">
+        {block.type === "Header" && (
+          <input
+            value={block.content || ""}
+            onChange={(e) => onContentChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Add a header..."
+            className={`w-full bg-transparent border-none outline-none ${cls || "text-2xl font-bold"}`}
+            style={css}
+          />
+        )}
+
+        {block.type === "Text" && (
+          <textarea
+            ref={textareaRef}
+            value={block.content || ""}
+            onChange={(e) => onContentChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Add your text here..."
+            rows={1}
+            className={`w-full bg-transparent border-none outline-none resize-none ${cls || "text-base"}`}
+            style={{ ...css, overflow: "hidden" }}
+          />
+        )}
+
+        {block.type === "Button" && (
+          <div className={`space-y-2 ${cls}`}>
+            <input
+              value={block.content || ""}
+              onChange={(e) => onContentChange(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Button label"
+              className="w-full px-5 py-3 rounded-xl font-semibold outline-none border-none"
+              style={{
+                backgroundColor: resolved.bgColor || theme.primaryColor,
+                color: resolved.textColor || "#FFFFFF",
+                fontFamily: css.fontFamily,
+                textAlign: resolved.textAlign || "center",
+              }}
+            />
+          </div>
+        )}
+
+        {(block.type === "Image" || block.type === "Video" || block.type === "Audio") && (
+          <MediaBlock
+            block={block}
+            theme={theme}
+            resolved={resolved}
+            css={css}
+            onFile={onFile}
+            onContentChange={onContentChange}
+          />
+        )}
+
+        {block.type === "Footer" && (
+          <input
+            value={block.content || ""}
+            onChange={(e) => onContentChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Footer text"
+            className={`w-full bg-transparent border-none outline-none ${cls || "text-xs text-gray-400 text-center"}`}
+            style={css}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Media block
+// ─────────────────────────────────────────────
+function MediaBlock({ block, theme, resolved, css, onFile, onContentChange }) {
+  const hasUrl = Boolean(block.meta?.url);
+  const bg = resolved.bgColor || "#F3F4F6";
+  const label = { Image: "image", Video: "video", Audio: "audio" }[block.type];
+
+  return (
+    <div className="space-y-2">
+      {hasUrl && block.type === "Image" && (
+        <img src={block.meta.url} alt="" className="w-full rounded-xl" />
       )}
-      {block.type === "Text" && (
-        <textarea autoFocus value={block.content || ""} onChange={e => onChange(block.id, "content", e.target.value)} className="input-field resize-none h-20" placeholder="Body text..." />
+      {hasUrl && block.type === "Video" && (
+        <video src={block.meta.url} controls className="w-full rounded-xl" style={{ backgroundColor: bg }} />
       )}
-      {block.type === "Button" && (
-        <>
-          <input autoFocus value={block.content || ""} onChange={e => onChange(block.id, "content", e.target.value)} className="input-field" placeholder="Button label..." />
-          <input value={block.meta?.url || ""} onChange={e => onChange(block.id, "url", e.target.value)} className="input-field" placeholder="Link URL (optional)..." />
-        </>
+      {hasUrl && block.type === "Audio" && (
+        <audio src={block.meta.url} controls className="w-full" />
       )}
-      {(block.type === "Video" || block.type === "Image" || block.type === "Audio") && (
-        <>
-          <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
-            <input type="file" className="hidden" onChange={e => onFile("url", e.target.files?.[0])} />
-            <span className="text-sm text-gray-500">{block.meta?.url ? "File selected ✓" : `Tap to upload ${block.type.toLowerCase()}`}</span>
+
+      {!hasUrl && (
+        <label
+          className="flex flex-col items-center justify-center gap-1.5 rounded-xl py-6 cursor-pointer transition-all border-2 border-dashed border-gray-200 hover:border-primary hover:bg-primary/5"
+          style={{ backgroundColor: bg }}
+        >
+          <input
+            type="file"
+            className="hidden"
+            onChange={(e) => onFile("url", e.target.files?.[0])}
+          />
+          <span className="text-xs font-medium text-gray-500">Upload {label}</span>
+          <span className="text-[10px] text-gray-400">Placeholder URL for now</span>
+        </label>
+      )}
+
+      {hasUrl && block.type === "Audio" && (
+        <input
+          value={block.content || ""}
+          onChange={(e) => onContentChange(e.target.value)}
+          placeholder="Track title"
+          className="w-full text-sm bg-transparent border-none outline-none"
+          style={css}
+        />
+      )}
+
+      {hasUrl && (
+        <div className="flex items-center justify-between text-[10px] text-gray-400">
+          <span className="truncate">{block.meta.url}</span>
+          <label className="cursor-pointer hover:text-primary shrink-0">
+            Replace
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => onFile("url", e.target.files?.[0])}
+            />
           </label>
-          <p className="text-xs text-gray-400">No upload endpoint yet — sends a placeholder URL for testing.</p>
-          {block.type === "Audio" && (
-            <input value={block.content || ""} onChange={e => onChange(block.id, "content", e.target.value)} className="input-field" placeholder="Track title..." />
-          )}
-        </>
+        </div>
       )}
     </div>
   );
 }
 
-function BlockPreview({ block, onClick }) {
+// ─────────────────────────────────────────────
+// Campaign Theme panel
+// ─────────────────────────────────────────────
+function CampaignThemePanel({ theme, setTheme }) {
   return (
-    <div onClick={onClick} className="cursor-pointer group min-h-[28px]">
-      {block.type === "Header" && (
-        <h2 className="text-lg font-bold text-gray-900 group-hover:text-primary transition-colors">
-          {block.content || <span className="text-gray-300 font-normal text-sm italic">Click to edit header</span>}
-        </h2>
-      )}
-      {block.type === "Text" && (
-        <p className="text-sm text-gray-600">{block.content || <span className="text-gray-300 italic">Click to add text...</span>}</p>
-      )}
-      {block.type === "Button" && (
-        <div className="flex items-center gap-2">
-          <div className="bg-primary text-white px-5 py-2 rounded-xl text-sm font-semibold">{block.content || "Button"}</div>
-          {block.meta?.url && <span className="text-xs text-gray-400">→ {block.meta.url}</span>}
+    <div className="p-4 space-y-5">
+      <div>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+          <Palette size={12} /> Campaign Theme
+        </p>
+        <p className="text-[11px] text-gray-400 mt-1">
+          Applies to the whole page. Select a block to override its styles.
+        </p>
+      </div>
+
+      <Section label="Primary color">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {COLOR_SWATCHES.map(c => (
+            <button
+              key={c}
+              onClick={() => setTheme(t => ({ ...t, primaryColor: c }))}
+              className={`w-6 h-6 rounded-full border-2 transition-all ${theme.primaryColor === c ? "border-primary scale-110" : "border-gray-200"}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
         </div>
-      )}
-      {block.type === "Video" && (
-        <div className="h-24 bg-purple-50 rounded-xl flex items-center justify-center text-purple-400 text-sm gap-2">
-          <Video size={16} /> {block.meta?.url ? "Video linked ✓" : "Click to add video"}
+      </Section>
+
+      <Section label="Background">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {COLOR_SWATCHES.map(c => (
+            <button
+              key={c}
+              onClick={() => setTheme(t => ({ ...t, bgColor: c }))}
+              className={`w-6 h-6 rounded-full border-2 transition-all ${theme.bgColor === c ? "border-primary scale-110" : "border-gray-200"}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
         </div>
-      )}
-      {block.type === "Image" && (
-        <div className="h-24 bg-green-50 rounded-xl flex items-center justify-center text-green-400 text-sm gap-2">
-          <Image size={16} /> {block.meta?.url ? "Image linked ✓" : "Click to add image"}
-        </div>
-      )}
-      {block.type === "Audio" && (
-        <div className="bg-yellow-50 rounded-xl p-3 flex items-center gap-3">
-          <Music size={16} className="text-yellow-500 shrink-0" />
-          <span className="text-sm text-gray-700">{block.content || <span className="italic text-gray-400">Click to add audio</span>}</span>
-        </div>
-      )}
-      {block.type === "Footer" && (
-        <p className="text-xs text-gray-400">{block.content || <span className="italic">Click to add footer text</span>}</p>
-      )}
+      </Section>
+
+      <Section label="Base font">
+        <select
+          value={theme.fontFamily}
+          onChange={e => setTheme(t => ({ ...t, fontFamily: e.target.value }))}
+          className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+        >
+          {FONT_FAMILIES.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+      </Section>
+
+      <Section label="Base size">
+        <select
+          value={theme.baseFontSize}
+          onChange={e => setTheme(t => ({ ...t, baseFontSize: e.target.value }))}
+          className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+        >
+          {FONT_SIZES.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+      </Section>
     </div>
   );
+}
+
+// ─────────────────────────────────────────────
+// Block Style panel
+// ─────────────────────────────────────────────
+function BlockStylePanel({ block, onStyle, onClose }) {
+  const s = block.style || {};
+  const setStyle = (k, v) => onStyle(k, v);
+
+  return (
+    <div className="p-4 space-y-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Editing</p>
+          <p className="text-sm font-semibold text-gray-900 mt-0.5">{block.type}</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Per-block overrides. Leave on "Theme" to inherit.
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-[10px] font-medium text-gray-400 hover:text-gray-700 px-2 py-1 rounded border border-gray-200 hover:border-gray-300 transition-all"
+          title="Deselect and go back to theme"
+        >
+          Done
+        </button>
+      </div>
+
+      <Section label="Text color">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <button
+            onClick={() => setStyle("textColor", null)}
+            className={`text-xs px-2 py-1 rounded border transition-all ${!s.textColor ? "border-primary bg-primary/5 text-primary" : "border-gray-200 text-gray-500"}`}
+          >
+            Theme
+          </button>
+          {COLOR_SWATCHES.map(c => (
+            <button
+              key={c}
+              onClick={() => setStyle("textColor", c)}
+              className={`w-5 h-5 rounded-full border-2 transition-all ${s.textColor === c ? "border-primary scale-110" : "border-gray-200"}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section label="Background">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <button
+            onClick={() => setStyle("bgColor", null)}
+            className={`text-xs px-2 py-1 rounded border transition-all ${!s.bgColor ? "border-primary bg-primary/5 text-primary" : "border-gray-200 text-gray-500"}`}
+          >
+            None
+          </button>
+          {COLOR_SWATCHES.map(c => (
+            <button
+              key={c}
+              onClick={() => setStyle("bgColor", c)}
+              className={`w-5 h-5 rounded-full border-2 transition-all ${s.bgColor === c ? "border-primary scale-110" : "border-gray-200"}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section label="Font">
+        <select
+          value={s.fontFamily || ""}
+          onChange={(e) => setStyle("fontFamily", e.target.value || null)}
+          className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+        >
+          <option value="">Use campaign theme</option>
+          {FONT_FAMILIES.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+      </Section>
+
+      <Section label="Size">
+        <ChipRow
+          value={s.fontSize}
+          options={[{ value: null, label: "Auto" }, ...FONT_SIZES]}
+          onSelect={(v) => setStyle("fontSize", v)}
+        />
+      </Section>
+
+      <Section label="Weight">
+        <ChipRow
+          value={s.fontWeight}
+          options={[{ value: null, label: "Auto" }, ...FONT_WEIGHTS]}
+          onSelect={(v) => setStyle("fontWeight", v)}
+        />
+      </Section>
+
+      <Section label="Alignment">
+        <ChipRow
+          value={s.textAlign}
+          options={TEXT_ALIGNS}
+          onSelect={(v) => setStyle("textAlign", s.textAlign === v ? null : v)}
+        />
+      </Section>
+
+      <button
+        onClick={() => {
+          setStyle("textColor", null);
+          setStyle("bgColor", null);
+          setStyle("fontFamily", null);
+          setStyle("fontSize", null);
+          setStyle("fontWeight", null);
+          setStyle("textAlign", null);
+        }}
+        className="w-full text-xs text-gray-500 hover:text-gray-800 py-2 border border-dashed border-gray-200 rounded-lg transition-all"
+      >
+        Reset styles to theme
+      </button>
+    </div>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-gray-600 mb-1.5 block">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function ChipRow({ value, options, onSelect }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map(opt => {
+        const isActive = value === opt.value;
+        return (
+          <button
+            key={String(opt.value)}
+            onClick={() => onSelect(opt.value)}
+            className={`text-xs px-2 py-1 rounded border transition-all ${isActive ? "border-primary bg-primary/5 text-primary" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Phone preview block
+// ─────────────────────────────────────────────
+function PreviewBlock({ block, theme }) {
+  const resolved = resolveStyle(theme, block.style);
+  const css = styleToCss(resolved);
+  const cls = styleToClasses(resolved);
+
+  switch (block.type) {
+    case "Header":
+      return <h2 className={cls || "text-2xl font-bold"} style={css}>{block.content}</h2>;
+    case "Text":
+      return <p className={cls || "text-base"} style={css}>{block.content}</p>;
+    case "Button":
+      return (
+        <button
+          className="px-5 py-3 text-sm rounded-xl w-full font-medium"
+          style={{
+            backgroundColor: resolved.bgColor || theme.primaryColor,
+            color: resolved.textColor || "#FFFFFF",
+            fontFamily: css.fontFamily,
+            textAlign: resolved.textAlign || "center",
+          }}
+        >
+          {block.content}
+        </button>
+      );
+    case "Video":
+      return block.meta?.url ? (
+        <video src={block.meta.url} controls className="w-full rounded-xl" />
+      ) : (
+        <div className="h-40 rounded-xl flex items-center justify-center text-sm bg-gray-100 text-gray-400">▶ Video</div>
+      );
+    case "Image":
+      return block.meta?.url ? (
+        <img src={block.meta.url} alt="" className="w-full rounded-xl" />
+      ) : (
+        <div className="h-32 rounded-xl flex items-center justify-center text-sm bg-gray-100 text-gray-400">📷 Image</div>
+      );
+    case "Audio":
+      return (
+        <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: resolved.bgColor || "#FEF3C7" }}>
+          {block.content && <p className={`text-sm ${cls}`} style={css}>{block.content}</p>}
+          {block.meta?.url && <audio src={block.meta.url} controls className="w-full" />}
+        </div>
+      );
+    case "Footer":
+      return <p className={`${cls || "text-xs text-center"}`} style={css}>{block.content}</p>;
+    default:
+      return null;
+  }
 }

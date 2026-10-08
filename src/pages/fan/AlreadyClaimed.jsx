@@ -1,32 +1,79 @@
 // src/pages/fan/AlreadyClaimed.jsx
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import MobileShell from '../../components/MobileShell'
 import { Lock } from 'lucide-react'
+import { SOCIAL_PLATFORMS } from '../../utils/campaignPageStyles'
+
+// ── Icon set (compact SVGs, one per platform) ──
+function InstagramIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="2" y="2" width="20" height="20" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+function YouTubeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+function SpotifyIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 13.5c2.5-1 5.5-1 8 0M7 10.5c3.5-1.5 7.5-1.5 11 0M9 16.5c2-0.7 4-0.7 6 0" />
+    </svg>
+  )
+}
+
+const ICON_FOR = {
+  instagram: <InstagramIcon />,
+  youtube: <YouTubeIcon />,
+  spotify: <SpotifyIcon />,
+}
+
+function SocialLink({ href, icon, label, color }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 transition-all flex-1 min-w-[120px]"
+      style={{ color }}
+    >
+      {icon}
+      {label}
+    </a>
+  )
+}
 
 export default function AlreadyClaimed() {
   const location = useLocation()
-  const [params] = useSearchParams()
-  
-  // ✅ Get real creator name from multiple sources
-  const creatorName = 
-    location.state?.creatorName || 
-    params.get('creator') || 
-    localStorage.getItem('creatorName') || 
-    'the owner'
 
-  // ✅ Social links (always shown - even if empty, use default)
-  const ig = params.get('ig') || 'https://instagram.com'
-  const yt = params.get('yt') || 'https://youtube.com'
-  const sp = params.get('sp') || 'https://spotify.com'
-  const tt = params.get('tt') || ''
-  const tw = params.get('tw') || ''
+  // Sent by TapEntry when a 403 illegal-tap response comes back.
+  const ownerFirstName = location.state?.ownerFirstName || null
+  const socialsFromState = location.state?.socials || null
 
-  const SocialLink = ({ href, icon, label }) => (
-    <a href={href} target="_blank" rel="noreferrer"
-      className="border border-gray-200 bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-medium hover:bg-gray-50 flex-1 min-w-[120px]">
-      {icon}{label}
-    </a>
+  // Fallback: normalize whatever the backend sent into a plain object.
+  const socials =
+    socialsFromState && typeof socialsFromState === 'object'
+      ? socialsFromState
+      : {}
+
+  // Only render socials that have a URL.
+  const activePlatforms = SOCIAL_PLATFORMS.filter(
+    (p) => typeof socials[p.key] === 'string' && socials[p.key].trim()
   )
+
+  const hasSocials = activePlatforms.length > 0
+
+  // Human label for the owner. Uses first name if provided, else generic.
+  const ownerLabel = ownerFirstName ? ownerFirstName : 'another fan'
 
   return (
     <MobileShell bg="bg-red-50">
@@ -40,39 +87,47 @@ export default function AlreadyClaimed() {
         </div>
 
         <h1 className="text-5xl font-black text-gray-900 leading-tight mb-4">HOLD UP</h1>
+
         <p className="text-primary font-bold text-lg mb-3">
-          This merch belongs to {creatorName} 🖐
+          {ownerFirstName
+            ? `This merch belongs to ${ownerFirstName} 🖐`
+            : 'This merch belongs to another fan 🖐'}
         </p>
+
         <p className="text-gray-500 text-sm mb-10 leading-relaxed max-w-xs">
           This piece is registered to another fan. Each NFC tag is unique and tied to one person.
         </p>
 
-        <a href="https://intelimerch.app" className="btn-primary rounded-full py-4 text-base font-bold mb-10 w-full block text-center">
+        <a
+          href="https://intelimerch.app"
+          className="btn-primary rounded-full py-4 text-base font-bold mb-10 w-full block text-center"
+        >
           Get Your Own Merch
         </a>
 
-        <p className="font-semibold text-gray-800 mb-4">But while you're here follow {creatorName}</p>
-        <div className="flex flex-wrap gap-3 w-full justify-center">
-          {/* ✅ Social icons - ALWAYS show the main 3 */}
-          <SocialLink href={ig} label="Instagram" icon={<InstagramIcon />} />
-          <SocialLink href={yt} label="YouTube" icon={<YouTubeIcon />} />
-          <SocialLink href={sp} label="Spotify" icon={<SpotifyIcon />} />
-          
-          {/* ✅ Optional socials - only show if provided */}
-          {tt && <SocialLink href={tt} label="TikTok" icon={<span>🎵</span>} />}
-          {tw && <SocialLink href={tw} label="Twitter" icon={<span>𝕏</span>} />}
-        </div>
+        {hasSocials ? (
+          <>
+            <p className="font-semibold text-gray-800 mb-4">
+  But while you're here, follow the artist
+</p>
+            <div className="flex flex-wrap gap-3 w-full justify-center">
+              {activePlatforms.map((platform) => (
+                <SocialLink
+                  key={platform.key}
+                  href={socials[platform.key]}
+                  label={platform.label}
+                  icon={ICON_FOR[platform.key]}
+                  color={platform.brandColor}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-gray-400 max-w-xs">
+            Follow the artist on social media to stay updated on new drops and perks.
+          </p>
+        )}
       </div>
     </MobileShell>
   )
-}
-
-function InstagramIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" /></svg>
-}
-function YouTubeIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" /></svg>
-}
-function SpotifyIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 13.5c2.5-1 5.5-1 8 0M7 10.5c3.5-1.5 7.5-1.5 11 0M9 16.5c2-0.7 4-0.7 6 0" /></svg>
 }
