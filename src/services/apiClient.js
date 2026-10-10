@@ -1,21 +1,25 @@
 // src/services/apiClient.js
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://intelimerch-api-production.up.railway.app/api/v1';
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  'https://intelimerch-api-production.up.railway.app/api/v1';
 
 // ── Token management ──
 export const getToken = () => localStorage.getItem('accessToken');
 export const setToken = (token) => localStorage.setItem('accessToken', token);
+
 export const clearToken = () => {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('user');
 };
 
-// Endpoints where a 401 means "bad credentials", not "your session expired".
+// Endpoints where a 401 means "this is a fan / entry endpoint" — never redirect
+// to /signin, always surface a friendly message.
 const AUTH_ENTRY_ENDPOINTS = [
   '/auth/login',
   '/auth/register-artist',
   '/auth/register-internal-team',
-  '/taps', // ✅ CORRECT: Use /taps (matches actual backend mounting)
+  '/taps',
 ];
 
 function isAuthEntryEndpoint(endpoint) {
@@ -32,10 +36,20 @@ export class ApiError extends Error {
   }
 }
 
+// ── Detect a genuinely expired session (not a generic 401) ──
+function isExpiredSessionMessage(message = '') {
+  const m = String(message).toLowerCase();
+  return (
+    m.includes('jwt expired') ||
+    m.includes('token expired') ||
+    m.includes('session expired') ||
+    m.includes('invalid or expired token')
+  );
+}
+
 // ── Generic API request ──
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken();
-
   const isFormData = options.body instanceof FormData;
 
   const headers = {
@@ -56,7 +70,29 @@ export async function apiRequest(endpoint, options = {}) {
 
     clearTimeout(timeoutId);
 
-    if (response.status === 401 && !isAuthEntryEndpoint(endpoint)) {
+    // ── TEMP: log every tap request/response ──
+if (endpoint.includes('/tap')) {
+  try {
+    const clone = response.clone();
+    const body = await clone.text();
+    console.log('[apiClient][tap] request:', {
+      endpoint,
+      body: options.body,
+      sentOwnerToken: (() => {
+        try { return JSON.parse(options.body || '{}').ownerToken; } catch { return null; }
+      })(),
+    });
+    console.log('[apiClient][tap] response:', {
+      status: response.status,
+      body,
+    });
+  } catch (e) {
+    console.warn('diagnostic log failed', e);
+  }
+}
+
+    // ── 401 handling ──
+    if (response.status === 401) {
       let data;
       try {
         data = await response.json();
@@ -65,26 +101,45 @@ export async function apiRequest(endpoint, options = {}) {
       }
 
       const message = data.message || '';
+      const isExpired = isExpiredSessionMessage(message);
+      const isFanEndpoint = isAuthEntryEndpoint(endpoint);
 
-      if (
-        message.includes('expired') ||
-        message.includes('invalid token') ||
-        message.includes('session expired') ||
-        message.includes('jwt expired') ||
-        message.includes('token expired')
-      ) {
-        clearToken();
-        window.location.href = '/signin';
-        throw new ApiError('Your session has expired. Please login again.', 401, 'SESSION_EXPIRED');
+      // ── Fan endpoints: never redirect, always friendly ──
+      if (isFanEndpoint) {
+        if (isExpired) {
+          throw new ApiError(
+            'Your tap session has ended. Tap your merch again to continue.',
+            401,
+            'FAN_SESSION_EXPIRED'
+          );
+        }
+        throw new ApiError(
+          message || "We couldn't verify this tap. Tap your merch again to continue.",
+          401,
+          'FAN_UNAUTHORIZED'
+        );
       }
 
+      // ── Artist endpoints: genuine expiry → log out ──
+      if (isExpired) {
+        clearToken();
+        window.location.href = '/signin';
+        throw new ApiError(
+          'Your session has expired. Please login again.',
+          401,
+          'SESSION_EXPIRED'
+        );
+      }
+
+      // ── Any other 401 → surface it, do NOT log out ──
       throw new ApiError(
-        data.message || 'You are not authorized to perform this action.',
+        message || 'You are not authorized to perform this action.',
         401,
         'UNAUTHORIZED'
       );
     }
 
+    // ── Parse body ──
     let data;
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
@@ -102,41 +157,50 @@ export async function apiRequest(endpoint, options = {}) {
     }
 
     if (!response.ok) {
-      throw new ApiError(
+      const apiError = new ApiError(
         data.message || data.error || 'Request failed. Please try again.',
         response.status,
         data.code
       );
+
+      // Preserve context the backend sends for illegal taps
+      if (data.ownerFirstName) apiError.ownerFirstName = data.ownerFirstName;
+      if (data.socials) apiError.socials = data.socials;
+
+      throw apiError;
     }
 
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
 
-    // ─── Handle AbortError (timeout) ───
     if (error.name === 'AbortError') {
       throw new ApiError(
-        'Connection timed out. Please check your internet connection and try again.',
+        'The request took too long. Please try again.',
         408,
         'TIMEOUT'
       );
     }
 
-    // ─── Handle Network Errors ───
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      console.error('[apiClient] fetch failed:', {
+        endpoint,
+        method: options.method || 'GET',
+        online: navigator.onLine,
+        error: error.message,
+      });
+
       throw new ApiError(
-        'Unable to connect to the server. Please check your internet connection.',
+        "We couldn't reach the server. Please try again in a moment.",
         0,
         'NETWORK_ERROR'
       );
     }
 
-    // ─── Handle Already Thrown ApiError ───
     if (error instanceof ApiError) {
       throw error;
     }
 
-    // ─── Handle Unknown Errors ───
     throw new ApiError(
       'Something went wrong. Please try again.',
       500,
@@ -178,13 +242,14 @@ export const authAPI = {
     const response = await api.post('/auth/login', payload);
     const user = response.data || response.user || response;
     const accessToken = response.accessToken || response.token;
-    const refreshToken = response.refreshToken || null;
+
+    if (accessToken) setToken(accessToken);
+    if (user) localStorage.setItem('user', JSON.stringify(user));
 
     return {
       ...response,
       user,
       accessToken,
-      refreshToken,
       accountType: user.accountType || user.role || 'USER',
     };
   },
@@ -194,7 +259,13 @@ export const authAPI = {
   registerInternalTeam: (data) => api.post('/auth/register-internal-team', data),
   createRole: (data) => api.post('/auth/create-role', data),
   getRoles: () => api.get('/auth/get-roles'),
-  logout: () => api.post('/auth/logout'),
+  logout: async () => {
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      clearToken();
+    }
+  },
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
 };
 
@@ -236,26 +307,9 @@ export const adminAPI = {
 // ── Perks APIs ──
 export const perksAPI = {
   getCategories: () => api.get('/admin/get-perks-categories'),
-
   createCategory: (data) => api.post('/admin/create-perk-category', data),
-
-  create: (artistId, data) => {
-    const formData = new FormData();
-    Object.entries(data).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        formData.append(key, value);
-      }
-    });
-    if (data.file) formData.append('file', data.file);
-
-    return apiRequest(`/admin/${artistId}/create-perk`, {
-      method: 'POST',
-      body: formData,
-    });
-  },
-
+  create: (data) => api.post('/perks', data),
   getAll: () => api.get('/perks'),
-
   update: (perkId, fields = {}, file = null) => {
     const formData = new FormData();
     Object.entries(fields).forEach(([key, value]) => {
@@ -271,13 +325,11 @@ export const perksAPI = {
       body: formData,
     });
   },
-
   updateJson: (perkId, fields = {}) => api.patch(`/perks/${perkId}`, fields),
-
   remove: (perkId) => api.delete(`/perks/${perkId}`),
 };
 
-// ── Campaign APIs (with pagination) ──
+// ── Campaign APIs ──
 export const campaignAPI = {
   create: (data) => api.post('/campaigns', data),
   getAll: (page = 1, limit = 20) => api.get(`/campaigns?page=${page}&limit=${limit}`),
@@ -288,7 +340,7 @@ export const campaignAPI = {
     api.post(`/campaigns/${campaignId}/pages`, pageStructure),
 };
 
-// ── Product APIs (with pagination) ──
+// ── Product APIs ──
 export const productAPI = {
   getAll: (page = 1, limit = 20) => api.get(`/products?page=${page}&limit=${limit}`),
   create: (data) => api.post('/products', data),
@@ -309,8 +361,10 @@ export const tiersAPI = {
 export const tagsAPI = {
   getAll: (page = 1, limit = 20) => api.get(`/tags?page=${page}&limit=${limit}`),
   getByCampaign: (campaignId) => api.get(`/tags/${campaignId}`),
-  getArtistTags: (page = 1, limit = 20) => api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
-  getAllForArtist: (page = 1, limit = 20) => api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
+  getArtistTags: (page = 1, limit = 20) =>
+    api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
+  getAllForArtist: (page = 1, limit = 20) =>
+    api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
   create: (data) => api.post('/tags', data),
   update: (tagId, data) => api.patch(`/tags/${tagId}`, data),
   remove: (tagId) => api.delete(`/tags/${tagId}`),
@@ -324,7 +378,7 @@ export const analyticsAPI = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// NFC TAP / FAN FLOW (ONCE - No duplicates) - Mounted at /taps
+// NFC TAP / FAN FLOW - Mounted at /taps
 // ══════════════════════════════════════════════════════════════════
 
 export const getOwnerToken = () => localStorage.getItem('ownerToken');
@@ -347,67 +401,61 @@ export const detectDeviceType = () => {
 
 // ── Device Info Helper ──
 export async function getDeviceInfo() {
-    try {
-        const ipResponse = await fetch("https://api.ipify.org?format=json");
-        const { ip } = await ipResponse.json();
+  let ip = null;
+  try {
+    const ipResponse = await fetch('https://api.ipify.org?format=json');
+    const json = await ipResponse.json();
+    ip = json.ip;
+  } catch (err) {
+    console.warn('IP lookup failed (non-fatal):', err.message);
+  }
 
-        const location = await new Promise((resolve) => {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    const { latitude, longitude, accuracy } = position.coords;
-                    resolve({ latitude, longitude, accuracy });
-                },
-                (error) => {
-                    console.error("Location error:", error.message);
-                    resolve({ latitude: null, longitude: null, accuracy: null });
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            );
-        });
+  const location = await new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        resolve({ latitude, longitude, accuracy });
+      },
+      (error) => {
+        console.error('Location error:', error.message);
+        resolve({ latitude: null, longitude: null, accuracy: null });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  });
 
-        return {
-            ip,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracy: location.accuracy,
-            country: "Unknown",
-            state: "Unknown",
-            city: "Unknown"
-        };
-    } catch (error) {
-        console.error("Error getting device info:", error);
-        return {
-            ip: null,
-            latitude: null,
-            longitude: null,
-            accuracy: null,
-            country: "Unknown",
-            state: "Unknown",
-            city: "Unknown"
-        };
-    }
+  return {
+    ip,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    accuracy: location.accuracy,
+    country: 'Unknown',
+    state: 'Unknown',
+    city: 'Unknown',
+  };
 }
 
-// ── Tap APIs (MOUNTED AT /taps - MATCHES ACTUAL BACKEND) ──
+// ── Tap outcome constants ──
+export const TAP_OUTCOME = {
+  RETURNING: 'returning',
+  FRESH: 'fresh',
+  CLAIMED: 'claimed',
+};
+
+// ── Tap APIs ──
 export const tapAPI = {
-  // POST /taps/:tagId/tap  ← CORRECT
-  tap: async (tagId, { ownerToken, deviceType, location, ip, latitude, longitude, accuracy } = {}) => {
+  tap: async (tagId, { ownerToken, deviceType, location } = {}) => {
     return api.post(`/taps/${tagId}/tap`, {
       ...(ownerToken && { ownerToken }),
       deviceType: deviceType || detectDeviceType(),
       ...(location && { location }),
-      ip,
-      latitude,
-      longitude,
-      accuracy,
     });
   },
 
-  // POST /taps/nfc/activate  ← CORRECT
   activate: async ({
     tapToken,
     ownerToken,
@@ -418,10 +466,6 @@ export const tapAPI = {
     consentGiven,
     deviceType,
     location,
-    ip,
-    latitude,
-    longitude,
-    accuracy,
   }) => {
     return api.post('/taps/nfc/activate', {
       tapToken,
@@ -433,48 +477,63 @@ export const tapAPI = {
       consentGiven,
       deviceType: deviceType || detectDeviceType(),
       ...(location && { location }),
-      ip,
-      latitude,
-      longitude,
-      accuracy,
     });
   },
 
-  // GET /taps/nfc/campaign-page-resources  ← CORRECT
   getCampaignResources: ({ tapToken, ownerToken }) => {
-    const params = new URLSearchParams({ tapToken, ownerToken });
+    const params = new URLSearchParams({ tapToken });
+    if (ownerToken) params.append('ownerToken', ownerToken);
     return api.get(`/taps/nfc/campaign-page-resources?${params.toString()}`);
   },
 
-  // GET /taps/nfc/campaign-page-resource/:resourceId  ← CORRECT
   getCampaignResource: (resourceId, { tapToken, ownerToken }) => {
     const params = new URLSearchParams({ tapToken, ownerToken });
     return api.get(`/taps/nfc/campaign-page-resource/${resourceId}?${params.toString()}`);
   },
 };
 
-export const readTapToken = (response) =>
-  response?.tapToken || response?.data?.tapToken || null;
-
-export const readOwnerToken = (response) =>
-  response?.ownerToken ||
-  response?.data?.ownerToken ||
-  response?.data?.owner?.token ||
-  null;
-
-export const TAP_OUTCOME = {
-  RETURNING: 'returning',
-  FRESH: 'fresh',
-  CLAIMED: 'claimed',
-};
-
+// ── Read tap outcome from response ──
 export const readTapOutcome = (response) => {
+  const explicitOutcome = (
+    response?.outcome ||
+    response?.data?.outcome ||
+    ''
+  ).toLowerCase();
+
+  if (
+    explicitOutcome === TAP_OUTCOME.CLAIMED ||
+    explicitOutcome === TAP_OUTCOME.RETURNING ||
+    explicitOutcome === TAP_OUTCOME.FRESH
+  ) {
+    return explicitOutcome;
+  }
+
   const message = (response?.message || '').toLowerCase();
+
+  if (message.includes('claimed') || message.includes('belongs to another')) {
+    return TAP_OUTCOME.CLAIMED;
+  }
   if (message.includes('welcome back') || message.includes('successful')) {
     return TAP_OUTCOME.RETURNING;
   }
   if (message.includes('activate') || message.includes('fresh')) {
     return TAP_OUTCOME.FRESH;
   }
+
   return TAP_OUTCOME.FRESH;
 };
+
+// ── Read tokens from response ──
+export const readTapToken = (response) =>
+  response?.tapToken ||
+  response?.data?.tapToken ||
+  response?.tokens?.tapToken ||
+  response?.data?.tokens?.tapToken ||
+  null;
+
+export const readOwnerToken = (response) =>
+  response?.ownerToken ||
+  response?.data?.ownerToken ||
+  response?.tokens?.ownerToken ||
+  response?.data?.tokens?.ownerToken ||
+  null;

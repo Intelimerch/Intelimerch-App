@@ -14,6 +14,44 @@ import { useAuth } from '../../context/AuthContext'
 import ServerError from '../../components/ServerError'
 
 const PIE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#A855F7', '#EF4444']
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// Convert backend scanTimeline entries ({ _id: {year, month, day, hour}, value })
+// into the { day, scans } shape Recharts expects.
+function formatTimeline(entries = []) {
+  return entries.map((entry) => {
+    const id = entry._id || {}
+    const value = entry.value ?? 0
+
+    // 24Hours range: year, month, day, hour
+    if (id.hour !== undefined) {
+      return {
+        day: `${String(id.hour).padStart(2, '0')}:00`,
+        scans: value,
+      }
+    }
+
+    // 7Days / 30Days: year, month, day
+    if (id.day !== undefined) {
+      const month = String(id.month).padStart(2, '0')
+      const day = String(id.day).padStart(2, '0')
+      return {
+        day: `${day}/${month}`,
+        scans: value,
+      }
+    }
+
+    // 12Months / 3Months: year, month
+    if (id.month !== undefined) {
+      return {
+        day: `${MONTHS[id.month - 1]} ${String(id.year).slice(-2)}`,
+        scans: value,
+      }
+    }
+
+    return { day: '—', scans: value }
+  })
+}
 
 export default function Overview() {
   const navigate = useNavigate()
@@ -23,23 +61,26 @@ export default function Overview() {
   const [analytics, setAnalytics] = useState(null)
   const [timeRange, setTimeRange] = useState('7 Days')
 
-  useEffect(() => {
-    async function fetchAnalytics() {
-      try {
-        setLoading(true)
-        setError(null)
-        const res = await analyticsAPI.getDashboardAnalytics()
-        console.log('📊 Dashboard analytics:', res)
-        const data = res?.analyticsData || res?.data || res || {}
-        setAnalytics(data)
-      } catch (err) {
-        console.error('Failed to load analytics:', err)
-        setError(err.message || 'Failed to load analytics')
-      } finally {
-        setLoading(false)
-      }
+  // ✅ Moved outside useEffect so ServerError's onRetry can call it
+  const fetchAnalytics = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await analyticsAPI.getDashboardAnalytics()
+      console.log('📊 Dashboard analytics:', res)
+      const data = res?.analyticsData || res?.data || res || {}
+      setAnalytics(data)
+    } catch (err) {
+      console.error('Failed to load analytics:', err)
+      setError(err.message || 'Failed to load analytics')
+    } finally {
+      setLoading(false)
     }
+  }
+
+  useEffect(() => {
     fetchAnalytics()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const totalScans = analytics?.totalNFCScans?.count ?? 0
@@ -52,8 +93,9 @@ export default function Overview() {
     : []
 
   const scanTimeline = analytics?.scanTimeline?.[0] || analytics?.scanTimeline || {}
-  const timelineData = scanTimeline[timeRange.replace(' ', '')] || []
-  
+  const rawTimeline = scanTimeline[timeRange.replace(' ', '')] || []
+  const timelineData = formatTimeline(rawTimeline)
+
   const chartData = timelineData.length > 0 ? timelineData : [
     { day: 'Mon', scans: 0 },
     { day: 'Tue', scans: 0 },

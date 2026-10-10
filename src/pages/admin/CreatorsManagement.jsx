@@ -36,20 +36,17 @@ export default function CreatorsManagement() {
       const res = await adminAPI.getCreators()
       console.log('📊 Creators API Response:', res)
       
-      // Parse the response (handles multiple shapes)
-      let list = []
-      if (Array.isArray(res.data)) list = res.data
-      else if (res.data?.creators && Array.isArray(res.data.creators)) list = res.data.creators
-      else if (Array.isArray(res)) list = res
-      else if (res.creators && Array.isArray(res.creators)) list = res.creators
+      // Response shape: { data: { totalCreators, currentlyActive, creators: [...] } }
+      const list = res.data?.creators || []
+      console.log(`✅ Found ${list.length} creators`)
       
-      // ✅ Filter: ONLY show Artists (NOT Staff/Admins)
-      const artistsOnly = list.filter(u => {
-        const type = (u.accountType || u.role || u.userType || '').toUpperCase()
-        return type === 'ARTIST' || type === 'CREATOR'
-      })
+      // Log first creator to see fields
+      if (list.length > 0) {
+        console.log('👤 First creator sample:', list[0])
+        console.log('👤 First creator keys:', Object.keys(list[0]))
+      }
       
-      setCreators(artistsOnly)
+      setCreators(list)
     } catch (err) {
       console.error('Failed to load creators:', err)
       setError(err.message || 'Failed to load creators')
@@ -64,22 +61,18 @@ export default function CreatorsManagement() {
 
   // ─── HELPER: Extract creator name ───
   const getCreatorName = (creator) => {
-    return creator.firstName || creator.name || creator.fullName || creator.username || 'Unknown Creator'
+    return creator.name || creator.firstName || creator.fullName || creator.username || 'Unknown Creator'
   }
 
   // ─── HELPER: Extract creator username ───
   const getCreatorUsername = (creator) => {
-    return creator.userName || creator.username || creator.handle || `@${creator.email?.split('@')[0] || 'user'}`
+    return creator.handle || creator.userName || creator.username || `@${creator.email?.split('@')[0] || 'user'}`
   }
 
-  // ─── HELPER: Check if creator is active (USES accountStatus) ───
+  // ─── HELPER: Check if creator is active ───
   const isCreatorActive = (creator) => {
-    // ✅ Swagger uses `accountStatus` field
-    const status = (creator.accountStatus || creator.status || '').toUpperCase()
-    return status === 'ACTIVE' || 
-           status === 'ACTIVE' || 
-           creator.isActive === true ||
-           status === 'ACTIVE'
+    const status = (creator.status || creator.accountStatus || '').toUpperCase()
+    return status === 'ACTIVE' || creator.isActive === true
   }
 
   // ─── Filter creators based on tab and search ───
@@ -293,11 +286,11 @@ export default function CreatorsManagement() {
                   </span>
                 </div>
 
-                {/* Stats - Horizontal */}
+                {/* Stats - Horizontal - Updated field names */}
                 <div className="flex gap-12 mb-5">
                   <div>
                     <p className="text-xs font-medium text-gray-500 mb-1">TAGS</p>
-                    <p className="text-xl font-bold text-gray-900">{creator.tagsCount ?? creator.tags ?? 0}</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.totalTags ?? creator.tagsCount ?? creator.tags ?? 0}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 mb-1">TOTAL SCANS</p>
@@ -305,7 +298,7 @@ export default function CreatorsManagement() {
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 mb-1">CAMPAIGN</p>
-                    <p className="text-xl font-bold text-gray-900">{creator.campaignsCount ?? creator.campaigns ?? 0}</p>
+                    <p className="text-xl font-bold text-gray-900">{creator.totalCampaign ?? creator.campaignsCount ?? creator.campaigns ?? 0}</p>
                   </div>
                 </div>
 

@@ -52,25 +52,37 @@
 
 /* ── Responsive overrides ── */
 @layer utilities {
-  /* Make stat cards stack nicely on small screens */
   @media (max-width: 640px) {
-    .stat-card {
-      @apply p-4;
-    }
-    .card {
-      @apply p-4;
-    }
+    .stat-card { @apply p-4; }
+    .card { @apply p-4; }
   }
 
-  /* Scrollable tables on medium screens */
   .table-scroll {
     @apply overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0;
   }
 
-  /* Auth card full width on mobile */
   @media (max-width: 480px) {
-    .auth-card-inner {
-      @apply p-5;
-    }
+    .auth-card-inner { @apply p-5; }
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Campaign page — perks reveal animation
+   Applied to the perks section when it mounts after the fan taps the
+   "Claim Your Perk" (or any no-URL button) in the campaign design.
+   ══════════════════════════════════════════════════════════════════ */
+
+@keyframes perks-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.perks-reveal {
+  animation: perks-reveal 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }

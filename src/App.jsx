@@ -75,7 +75,7 @@ function ProtectedRoute({ children }) {
   return children
 }
 
-// ─── Admin Route Component (FIXED - Checks accountType) ───
+// ─── Admin Route Component ───
 function AdminRoute({ children }) {
   const { user, isLoading } = useAuth()
 
@@ -126,8 +126,8 @@ export default function App() {
   return (
     <AuthProvider>
       <FormProvider>
-        <ErrorBoundary>
-          <BrowserRouter>
+        <BrowserRouter>
+          <ErrorBoundary>
             <Routes>
               <Route path="/" element={<Navigate to="/signin" replace />} />
 
@@ -148,12 +148,12 @@ export default function App() {
                 <Route path="campaigns/create" element={<CreateCampaign />} />
                 <Route path="campaigns/new" element={<NewCampaign />} />
                 <Route path="campaigns/:campaignId/analytics" element={<CampaignAnalytics />} />
-                
+
                 <Route path="products" element={<Products />} />
                 <Route path="products/add" element={<AddProduct />} />
                 <Route path="products/edit/:productId" element={<EditProduct />} />
                 <Route path="products/assign/:productId" element={<AssignToCampaign />} />
-                
+
                 <Route path="fans" element={<Fans />} />
                 <Route path="perks" element={<PerksLibrary />} />
                 <Route path="perks/upload" element={<UploadPerk />} />
@@ -175,7 +175,7 @@ export default function App() {
               <Route path="/fan/perks/document" element={<DocumentPerk />} />
               <Route path="/fan/perks/link" element={<LinkPerk />} />
 
-              {/* Admin - Protected (FIXED) */}
+              {/* Admin - Protected */}
               <Route path="/admin" element={
                 <AdminRoute>
                   <AdminLayout />
@@ -195,8 +195,8 @@ export default function App() {
               {/* 404 Page */}
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </BrowserRouter>
-        </ErrorBoundary>
+          </ErrorBoundary>
+        </BrowserRouter>
       </FormProvider>
     </AuthProvider>
   )

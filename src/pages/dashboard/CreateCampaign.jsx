@@ -1,4 +1,4 @@
-// src/pages/dashboard/CreateCampaign.jsx
+
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -14,7 +14,11 @@ import {
 import { campaignAPI, perksAPI } from "../../services/apiClient";
 import { useFormPersistence } from "../../hooks/useFormPersistence";
 
-const mediaTypes = ["image", "video", "link"];
+// ─── TEMP: Cloudinary not yet set up on backend ───
+// Only "link" is enabled. Restore "image" / "video" once the backend
+// supports multipart uploads again.
+const mediaTypes = ["link"];
+// const mediaTypes = ["image", "video", "link"];  // ← restore later
 
 function validateCampaign(data) {
   const errors = {};
@@ -31,23 +35,30 @@ function validateCampaign(data) {
   if (!data.selectedPerkIds || data.selectedPerkIds.length === 0) {
     errors.perks = "Select at least one perk";
   }
+  // Require mediaUrl when link type is used
+  if (data.mediaType === "link" && (!data.mediaUrl || !data.mediaUrl.trim())) {
+    errors.mediaUrl = "Media URL is required";
+  }
   return errors;
 }
 
 export default function CreateCampaign() {
   const navigate = useNavigate();
-  
-  // ✅ Use useFormPersistence with sessionStorage (survives refresh)
-  const [formData, setFormData, clearSavedForm] = useFormPersistence("artist_create_campaign", {
-    campaignName: "",
-    status: "active",
-    startDate: "",
-    endDate: "",
-    mediaType: "image",
-    mediaFileName: "",
-    mediaUrl: "",
-    selectedPerkIds: [],
-  });
+
+  const [formData, setFormData, clearSavedForm] = useFormPersistence(
+    "artist_create_campaign",
+    {
+      campaignName: "",
+      status: "active",
+      startDate: "",
+      endDate: "",
+      mediaType: "link",
+      mediaFileName: "",
+      mediaFile: null,
+      mediaUrl: "",
+      selectedPerkIds: [],
+    }
+  );
 
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
@@ -73,52 +84,41 @@ export default function CreateCampaign() {
   }, []);
 
   const togglePerk = (id) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       selectedPerkIds: prev.selectedPerkIds.includes(id)
-        ? prev.selectedPerkIds.filter(x => x !== id)
-        : [...prev.selectedPerkIds, id]
+        ? prev.selectedPerkIds.filter((x) => x !== id)
+        : [...prev.selectedPerkIds, id],
     }));
   };
 
   const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
     if (fieldErrors[field])
-      setFieldErrors(prev => ({ ...prev, [field]: null }));
+      setFieldErrors((prev) => ({ ...prev, [field]: null }));
     if (apiError) setApiError(null);
     if (success) setSuccess(false);
   };
 
-  const buildDummyMediaUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || "campaign-media")}`;
-
-  // ✅ Clear form when navigating back
   const handleBack = () => {
     clearSavedForm();
     navigate("/dashboard/campaigns");
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setFieldErrors({})
-    setApiError(null)
-    setSuccess(false)
+    e.preventDefault();
+    setFieldErrors({});
+    setApiError(null);
+    setSuccess(false);
 
-    const errors = validateCampaign(formData)
+    const errors = validateCampaign(formData);
+
     if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors)
-      return
+      setFieldErrors(errors);
+      return;
     }
 
-    // Resolve mediaUrl BEFORE building payload
-    let resolvedMediaUrl = 'https://placeholder.intelimerch.com/campaign-default.jpg'
-    if (formData.mediaType === 'link' && formData.mediaUrl) {
-      resolvedMediaUrl = formData.mediaUrl
-    } else if ((formData.mediaType === 'image' || formData.mediaType === 'video') && formData.mediaFileName) {
-      resolvedMediaUrl = buildDummyMediaUrl(formData.mediaFileName)
-    }
-
-    setLoading(true)
+    setLoading(true);
     try {
       const payload = {
         campaignName: formData.campaignName.trim(),
@@ -126,38 +126,51 @@ export default function CreateCampaign() {
         startDate: new Date(formData.startDate).toISOString(),
         endDate: new Date(formData.endDate).toISOString(),
         mediaType: formData.mediaType,
-        mediaUrl: resolvedMediaUrl,
         status: formData.status,
-      }
+        // Always send mediaUrl for link type
+        ...(formData.mediaType === "link" && formData.mediaUrl
+          ? { mediaUrl: formData.mediaUrl.trim() }
+          : {}),
+      };
 
-      console.log('📤 Sending payload:', payload)
+      console.log("📤 Sending payload:", payload);
 
-      const response = await campaignAPI.create(payload)
-      console.log('✅ Campaign created:', response)
-      setSuccess(true)
+      // ─── TEMP: Cloudinary not yet set up — send JSON only ───
+      // The 2nd arg (file) is temporarily not passed.
+      // Restore once the backend supports multipart uploads:
+      //   const response = await campaignAPI.create(
+      //     payload,
+      //     formData.mediaType !== "link" ? formData.mediaFile : null
+      //   );
+      const response = await campaignAPI.create(payload);
 
-      // ✅ Clear saved form after successful creation
-      clearSavedForm()
+      console.log("✅ Campaign created:", response);
+      setSuccess(true);
+
+      clearSavedForm();
 
       const newCampaignId =
         response.campaign?._id ||
         response.campaign?.id ||
         response.data?._id ||
         response.data?.campaignId ||
-        response._id
+        response._id;
 
       setTimeout(() => {
-        navigate('/dashboard/campaigns/new', {
-          state: { campaignId: newCampaignId, campaignName: formData.campaignName.trim() }
-        })
-      }, 1000)
+        navigate("/dashboard/campaigns/new", {
+          state: {
+            campaignId: newCampaignId,
+            campaignName: formData.campaignName.trim(),
+          },
+        });
+      }, 1000);
     } catch (err) {
-      console.error('❌ Error creating campaign:', err)
-      setApiError(err.message || 'Failed to create campaign')
+      console.error("❌ Error creating campaign:", err);
+      setApiError(err.message || "Failed to create campaign");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const renderError = (field) =>
     fieldErrors[field] ? (
@@ -176,10 +189,7 @@ export default function CreateCampaign() {
           </h1>
           <p className="text-gray-500 text-sm">Create a new campaign</p>
         </div>
-        <button
-          onClick={handleBack}
-          className="btn-outline w-auto px-5 text-sm"
-        >
+        <button onClick={handleBack} className="btn-outline w-auto px-5 text-sm">
           <ArrowLeft size={14} /> Back
         </button>
       </div>
@@ -206,7 +216,11 @@ export default function CreateCampaign() {
               </label>
               <input
                 type="text"
-                className={`input-field w-full ${fieldErrors.campaignName ? "border-red-500 focus:ring-red-500" : ""}`}
+                className={`input-field w-full ${
+                  fieldErrors.campaignName
+                    ? "border-red-500 focus:ring-red-500"
+                    : ""
+                }`}
                 placeholder="enter campaign name"
                 value={formData.campaignName}
                 onChange={(e) => handleChange("campaignName", e.target.value)}
@@ -259,6 +273,10 @@ export default function CreateCampaign() {
               <label className="block text-sm font-semibold text-gray-800 mb-1.5">
                 Campaign Media
               </label>
+
+              {/* ─── TEMP: media type buttons hidden while Cloudinary is disabled ─── */}
+              {/* Restore this block once image/video uploads are re-enabled. */}
+              {/*
               <div className="flex gap-2 mb-2">
                 {mediaTypes.map((t) => (
                   <button
@@ -266,40 +284,67 @@ export default function CreateCampaign() {
                     type="button"
                     onClick={() => handleChange("mediaType", t)}
                     disabled={loading || success}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${formData.mediaType === t ? "bg-primary text-white" : "bg-gray-100 text-gray-600"}`}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${
+                      formData.mediaType === t
+                        ? "bg-primary text-white"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
                   >
                     {t}
                   </button>
                 ))}
               </div>
+              */}
 
-              {formData.mediaType === "image" || formData.mediaType === "video" ? (
-                <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => handleChange("mediaFileName", e.target.files?.[0]?.name || "")}
-                    disabled={loading || success}
-                  />
-                  <span className="text-sm text-gray-500">
-                    {formData.mediaFileName || "Tap to upload campaign banner"}
-                  </span>
-                </label>
-              ) : (
-                <input
-                  type="url"
-                  className="input-field w-full"
-                  placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
-                  value={formData.mediaUrl}
-                  onChange={(e) => handleChange("mediaUrl", e.target.value)}
-                  disabled={loading || success}
-                />
+              {/* ─── TEMP: file upload UI hidden while Cloudinary is disabled ─── */}
+              {/*
+              {(formData.mediaType === "image" || formData.mediaType === "video") && (
+                <>
+                  <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
+                    <input
+                      type="file"
+                      accept={formData.mediaType === "image" ? "image/*" : "video/*"}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            mediaFileName: file.name,
+                            mediaFile: file,
+                          }));
+                        }
+                      }}
+                      disabled={loading || success}
+                    />
+                    <span className="text-sm text-gray-500">
+                      {formData.mediaFileName || "Tap to upload campaign banner"}
+                    </span>
+                  </label>
+                  {renderError("mediaFile")}
+                </>
               )}
-              <p className="text-xs text-gray-400 mt-1">
-                {formData.mediaType === "link"
-                  ? "Provide a direct URL to your media"
-                  : "Upload a file for your campaign banner"}
-              </p>
+              */}
+
+              {/* Link input — always shown while Cloudinary is disabled */}
+              <input
+                type="url"
+                className={`input-field w-full ${
+                  fieldErrors.mediaUrl
+                    ? "border-red-500 focus:ring-red-500"
+                    : ""
+                }`}
+                placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
+                value={formData.mediaUrl}
+                onChange={(e) => handleChange("mediaUrl", e.target.value)}
+                disabled={loading || success}
+              />
+              {renderError("mediaUrl")}
+              {/* <p className="text-xs text-gray-400 mt-1">
+                Provide a direct URL to your campaign media. File uploads are
+                temporarily disabled while we finish setting up our media
+                service.
+              </p> */}
             </div>
 
             <div>
@@ -315,14 +360,18 @@ export default function CreateCampaign() {
                 >
                   <span
                     className={
-                      formData.selectedPerkIds.length ? "text-gray-800" : "text-gray-400"
+                      formData.selectedPerkIds.length
+                        ? "text-gray-800"
+                        : "text-gray-400"
                     }
                   >
                     {loadingPerks
                       ? "Loading perks..."
                       : formData.selectedPerkIds.length
-                        ? `${formData.selectedPerkIds.length} perk${formData.selectedPerkIds.length > 1 ? "s" : ""} selected`
-                        : "Select perks to link to this campaign"}
+                      ? `${formData.selectedPerkIds.length} perk${
+                          formData.selectedPerkIds.length > 1 ? "s" : ""
+                        } selected`
+                      : "Select perks to link to this campaign"}
                   </span>
                   <ChevronDown size={15} className="text-gray-400 shrink-0" />
                 </button>
@@ -341,7 +390,11 @@ export default function CreateCampaign() {
                           className="flex items-center gap-2 w-full px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
                         >
                           <div
-                            className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${formData.selectedPerkIds.includes(perk._id) ? "bg-primary border-primary" : "border-gray-300"}`}
+                            className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${
+                              formData.selectedPerkIds.includes(perk._id)
+                                ? "bg-primary border-primary"
+                                : "border-gray-300"
+                            }`}
                           >
                             {formData.selectedPerkIds.includes(perk._id) && (
                               <Check size={10} className="text-white" />
@@ -397,7 +450,9 @@ function DateField({ label, value, onChange, error, disabled }) {
       <div className="relative">
         <input
           type="date"
-          className={`input-field w-full pr-10 ${error ? "border-red-500 focus:ring-red-500" : ""}`}
+          className={`input-field w-full pr-10 ${
+            error ? "border-red-500 focus:ring-red-500" : ""
+          }`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
