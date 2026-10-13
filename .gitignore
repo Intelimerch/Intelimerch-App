@@ -1,1 +1,62 @@
-/node_modules
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ──
+dist/
+build/
+dist-ssr/
+*.local
+
+# ── Environment files ──
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep the example file (so others know what env vars are needed)
+!.env.example
+
+# ── Logs ──
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Editor / OS ──
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ── Vite ──
+.vite/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# ── Netlify (if you use local dev tooling) ──
+.netlify/
+
+# ── Vercel (if you keep the old deploy around) ──
+.vercel/
+
+# ── Cache directories ──
+.cache/
+.parcel-cache/
+.eslintcache
+
+# ── Testing / coverage ──
+coverage/
+.nyc_output/
+
+# ── Misc ──
+*.tsbuildinfo
