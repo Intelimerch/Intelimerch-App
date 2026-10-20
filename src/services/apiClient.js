@@ -71,25 +71,29 @@ export async function apiRequest(endpoint, options = {}) {
     clearTimeout(timeoutId);
 
     // ── TEMP: log every tap request/response ──
-if (endpoint.includes('/tap')) {
-  try {
-    const clone = response.clone();
-    const body = await clone.text();
-    console.log('[apiClient][tap] request:', {
-      endpoint,
-      body: options.body,
-      sentOwnerToken: (() => {
-        try { return JSON.parse(options.body || '{}').ownerToken; } catch { return null; }
-      })(),
-    });
-    console.log('[apiClient][tap] response:', {
-      status: response.status,
-      body,
-    });
-  } catch (e) {
-    console.warn('diagnostic log failed', e);
-  }
-}
+    if (endpoint.includes('/tap')) {
+      try {
+        const clone = response.clone();
+        const body = await clone.text();
+        console.log('[apiClient][tap] request:', {
+          endpoint,
+          body: options.body,
+          sentOwnerToken: (() => {
+            try {
+              return JSON.parse(options.body || '{}').ownerToken;
+            } catch {
+              return null;
+            }
+          })(),
+        });
+        console.log('[apiClient][tap] response:', {
+          status: response.status,
+          body,
+        });
+      } catch (e) {
+        console.warn('diagnostic log failed', e);
+      }
+    }
 
     // ── 401 handling ──
     if (response.status === 401) {
@@ -104,7 +108,6 @@ if (endpoint.includes('/tap')) {
       const isExpired = isExpiredSessionMessage(message);
       const isFanEndpoint = isAuthEntryEndpoint(endpoint);
 
-      // ── Fan endpoints: never redirect, always friendly ──
       if (isFanEndpoint) {
         if (isExpired) {
           throw new ApiError(
@@ -120,7 +123,6 @@ if (endpoint.includes('/tap')) {
         );
       }
 
-      // ── Artist endpoints: genuine expiry → log out ──
       if (isExpired) {
         clearToken();
         window.location.href = '/signin';
@@ -131,7 +133,6 @@ if (endpoint.includes('/tap')) {
         );
       }
 
-      // ── Any other 401 → surface it, do NOT log out ──
       throw new ApiError(
         message || 'You are not authorized to perform this action.',
         401,
@@ -163,7 +164,6 @@ if (endpoint.includes('/tap')) {
         data.code
       );
 
-      // Preserve context the backend sends for illegal taps
       if (data.ownerFirstName) apiError.ownerFirstName = data.ownerFirstName;
       if (data.socials) apiError.socials = data.socials;
 
@@ -231,7 +231,7 @@ export const api = {
 };
 
 // ── Auth APIs ──
-export const authAPI = {
+ export const authAPI = {
   login: async (identifier, password) => {
     const trimmed = (identifier || '').trim();
     const isEmail = trimmed.includes('@');
@@ -259,6 +259,7 @@ export const authAPI = {
   registerInternalTeam: (data) => api.post('/auth/register-internal-team', data),
   createRole: (data) => api.post('/auth/create-role', data),
   getRoles: () => api.get('/auth/get-roles'),
+  
   logout: async () => {
     try {
       await api.post('/auth/logout');
@@ -266,7 +267,16 @@ export const authAPI = {
       clearToken();
     }
   },
-  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+
+  // ── Email Confirmation & Password Reset ──
+  confirmEmail: (email, otp) => api.post('/auth/confirm-email', { email, otp }),
+  
+  requestPasswordOtp: (email) => api.post('/auth/forgot-password/request-otp', { email }),
+  
+  verifyPasswordOtp: (email, otp) => api.post('/auth/forgot-password/verify-otp', { email, otp }),
+  
+  resetPassword: (data) => api.post('/auth/forgot-password/reset', data),
+
 };
 
 // ── Admin APIs ──
@@ -308,8 +318,21 @@ export const adminAPI = {
 export const perksAPI = {
   getCategories: () => api.get('/admin/get-perks-categories'),
   createCategory: (data) => api.post('/admin/create-perk-category', data),
-  create: (data) => api.post('/perks', data),
+
+  // POST /perks — now requires multipart with a `file`.
+  create: (data, file) => {
+    const formData = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        formData.append(key, value);
+      }
+    });
+    if (file) formData.append('file', file);
+    return apiRequest('/perks', { method: 'POST', body: formData });
+  },
+
   getAll: () => api.get('/perks'),
+
   update: (perkId, fields = {}, file = null) => {
     const formData = new FormData();
     Object.entries(fields).forEach(([key, value]) => {
@@ -325,19 +348,62 @@ export const perksAPI = {
       body: formData,
     });
   },
+
   updateJson: (perkId, fields = {}) => api.patch(`/perks/${perkId}`, fields),
   remove: (perkId) => api.delete(`/perks/${perkId}`),
 };
 
 // ── Campaign APIs ──
 export const campaignAPI = {
-  create: (data) => api.post('/campaigns', data),
+  create: (data, file) => {
+    const formData = new FormData();
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (key === 'perks') {
+        formData.append('perks', JSON.stringify(value || []));
+      } else if (value !== undefined && value !== null) {
+        formData.append(key, value);
+      }
+    });
+
+    if (file) formData.append('media', file);
+
+    return apiRequest('/campaigns', { method: 'POST', body: formData });
+  },
   getAll: (page = 1, limit = 20) => api.get(`/campaigns?page=${page}&limit=${limit}`),
   getById: (campaignId) => api.get(`/campaigns/${campaignId}`),
   update: (campaignId, data) => api.patch(`/campaigns/${campaignId}`, data),
   delete: (campaignId) => api.delete(`/campaigns/${campaignId}`),
-  createPage: (campaignId, pageStructure) =>
-    api.post(`/campaigns/${campaignId}/pages`, pageStructure),
+
+  // POST /campaigns/:campaignId/pages — now requires multipart with
+  // pageStructure as a JSON string.
+  createPage: (campaignId, pageStructure) => {
+    const formData = new FormData();
+    formData.append('pageStructure', JSON.stringify(pageStructure));
+    return apiRequest(`/campaigns/${campaignId}/pages`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+};
+
+// ── Artist APIs (new) ──
+export const artistAPI = {
+  getFanDashboard: ({
+    search,
+    merchType,
+    campaignId,
+    purchaseDate,
+    page = 1,
+    limit = 10,
+  } = {}) => {
+    const params = new URLSearchParams({ page, limit });
+    if (search) params.append('search', search);
+    if (merchType) params.append('merchType', merchType);
+    if (campaignId) params.append('campaignId', campaignId);
+    if (purchaseDate) params.append('purchaseDate', purchaseDate);
+    return api.get(`/artist/fan/dashboard?${params.toString()}`);
+  },
 };
 
 // ── Product APIs ──
@@ -523,7 +589,6 @@ export const readTapOutcome = (response) => {
   return TAP_OUTCOME.FRESH;
 };
 
-// ── Read tokens from response ──
 export const readTapToken = (response) =>
   response?.tapToken ||
   response?.data?.tapToken ||

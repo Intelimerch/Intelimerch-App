@@ -57,6 +57,55 @@ const defaultBlocks = [
 ];
 
 // ─────────────────────────────────────────────
+// Schema transform — frontend shape → backend shape
+// ─────────────────────────────────────────────
+function toBackendPageStructure({ blocks, theme, socials }) {
+  return {
+    blocks: blocks.map((b, i) => {
+      const rawId = b.id ?? `block-${Date.now()}-${i}`;
+      const type = String(b.type || "text").toLowerCase();
+
+      let content;
+      if (b.content === null || b.content === undefined) {
+        content = {};
+      } else if (typeof b.content === "string") {
+        content = { text: b.content };
+      } else if (typeof b.content === "object") {
+        content = { ...b.content };
+      } else {
+        content = { text: String(b.content) };
+      }
+
+      // Strip any File objects, blob: URLs, or nulls from meta before
+      // sending. The backend doesn't need them, and JSON.stringify(File)
+      // produces `{}` which is confusing in logs.
+      if (b.meta && typeof b.meta === "object") {
+        const safeMeta = {};
+        Object.entries(b.meta).forEach(([k, v]) => {
+          if (v instanceof File) return;
+          if (v === undefined || v === null) return;
+          if (k === "url" && typeof v === "string" && v.startsWith("blob:")) return;
+          safeMeta[k] = v;
+        });
+        if (Object.keys(safeMeta).length > 0) {
+          content.meta = safeMeta;
+        }
+      }
+
+      return {
+        blockId: String(rawId),
+        type,
+        content,
+        styles: b.style || {},
+      };
+    }),
+    styles: { theme: normalizeTheme(theme) },
+    settings: {},
+    socialLinks: normalizeSocials(socials),
+  };
+}
+
+// ─────────────────────────────────────────────
 // Publish success modal
 // ─────────────────────────────────────────────
 function PublishSuccessModal({ isOpen, onClose, campaignName, onDone }) {
@@ -231,6 +280,25 @@ export default function NewCampaign() {
     ));
   };
 
+  // ── File upload for a block ──
+  const handleBlockFile = (blockId, file) => {
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    setBlocks(prev => prev.map(x =>
+      x.id === blockId
+        ? {
+            ...x,
+            meta: {
+              ...x.meta,
+              url: objectUrl,       // local preview
+              file,                 // raw File to upload
+              fileName: file.name,  // for display
+            },
+          }
+        : x
+    ));
+  };
+
   const onDragStart = (e, id) => {
     setDraggingId(id);
     e.dataTransfer.effectAllowed = "move";
@@ -258,9 +326,6 @@ export default function NewCampaign() {
     setDragOverId(null);
   };
 
-  const buildDummyUrl = (name) =>
-    `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(name || "file")}`;
-
   const handlePublish = async () => {
     setError("");
     if (!campaignId) {
@@ -270,17 +335,28 @@ export default function NewCampaign() {
 
     setPublishing(true);
     try {
-      const pageStructure = {
-        version: 1,
-        theme: normalizeTheme(theme),
-        socials: normalizeSocials(socials),
-        blocks: blocks.map(b => ({
-          ...b,
-          style: normalizeBlockStyle(b.style),
-        })),
-      };
+      const pageStructure = toBackendPageStructure({ blocks, theme, socials });
 
-      const response = await campaignAPI.createPage(campaignId, { pageStructure });
+      // Collect any block files for upload
+      const files = {};
+      blocks.forEach((b) => {
+        if (b.meta?.file instanceof File) {
+          files[`file_${String(b.id)}`] = b.meta.file;
+        }
+      });
+
+      console.log(
+        "📤 Publishing page:",
+        pageStructure,
+        "| files:",
+        Object.keys(files)
+      );
+
+      const response = await campaignAPI.createPage(
+        campaignId,
+        pageStructure,
+        files
+      );
       console.log("✅ Campaign page created:", response);
 
       clearSavedBlocks();
@@ -289,7 +365,21 @@ export default function NewCampaign() {
       setShowSuccessModal(true);
     } catch (err) {
       console.error("❌ Error publishing campaign page:", err);
-      setError(err.message || "Failed to publish campaign page.");
+
+      // Friendly handling for the specific backend errors
+      if (err?.status === 409) {
+        setError(
+          "A page already exists for this campaign. There's no update endpoint yet — use a different campaign or contact support."
+        );
+      } else if (
+        err?.message?.toLowerCase().includes("does not match block")
+      ) {
+        setError(
+          "One of the uploaded files doesn't match its block type (image / video / audio). Please check and try again."
+        );
+      } else {
+        setError(err.message || "Failed to publish campaign page.");
+      }
     } finally {
       setPublishing(false);
     }
@@ -323,9 +413,6 @@ export default function NewCampaign() {
   return (
     <>
       <div className="flex -m-8 h-screen overflow-hidden">
-        {/* ──────────────────────────────
-            LEFT SIDEBAR
-        ────────────────────────────── */}
         <div
           data-sidebar
           ref={sidebarRef}
@@ -383,7 +470,6 @@ export default function NewCampaign() {
             </div>
           </div>
 
-          {/* ── Social Links ── */}
           <div className="p-4 border-b border-gray-100">
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
               Social Links
@@ -412,7 +498,6 @@ export default function NewCampaign() {
             </div>
           </div>
 
-          {/* ── Theme OR Block Style panel ── */}
           {selectedBlock ? (
             <BlockStylePanel
               block={selectedBlock}
@@ -424,9 +509,6 @@ export default function NewCampaign() {
           )}
         </div>
 
-        {/* ──────────────────────────────
-            MAIN — canvas / preview
-        ────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="bg-white border-b border-gray-100 px-6 py-3.5 flex items-center justify-between shrink-0">
             <div>
@@ -486,7 +568,7 @@ export default function NewCampaign() {
                         onMetaChange={(k, v) => updateBlockMeta(block.id, k, v)}
                         onDuplicate={() => duplicateBlock(block.id)}
                         onRemove={() => removeBlock(block.id)}
-                        onFile={(field, file) => updateBlockMeta(block.id, field, buildDummyUrl(file?.name))}
+                        onFile={(file) => handleBlockFile(block.id, file)}
                         onDragStart={(e) => onDragStart(e, block.id)}
                         onDragOver={(e) => onDragOver(e, block.id)}
                         onDrop={(e) => onDrop(e, block.id)}
@@ -543,9 +625,6 @@ export default function NewCampaign() {
   );
 }
 
-// ─────────────────────────────────────────────
-// Canvas block — renders live and editable
-// ─────────────────────────────────────────────
 function CanvasBlock({
   block, theme, isSelected, isDragging, isDragOver,
   onSelect, onContentChange, onMetaChange,
@@ -679,13 +758,15 @@ function CanvasBlock({
   );
 }
 
-// ─────────────────────────────────────────────
-// Media block
-// ─────────────────────────────────────────────
 function MediaBlock({ block, theme, resolved, css, onFile, onContentChange }) {
   const hasUrl = Boolean(block.meta?.url);
   const bg = resolved.bgColor || "#F3F4F6";
   const label = { Image: "image", Video: "video", Audio: "audio" }[block.type];
+  const accept = {
+    Image: "image/*",
+    Video: "video/*",
+    Audio: "audio/*",
+  }[block.type];
 
   return (
     <div className="space-y-2">
@@ -706,11 +787,14 @@ function MediaBlock({ block, theme, resolved, css, onFile, onContentChange }) {
         >
           <input
             type="file"
+            accept={accept}
             className="hidden"
-            onChange={(e) => onFile("url", e.target.files?.[0])}
+            onChange={(e) => onFile(e.target.files?.[0])}
           />
           <span className="text-xs font-medium text-gray-500">Upload {label}</span>
-          <span className="text-[10px] text-gray-400">Placeholder URL for now</span>
+          <span className="text-[10px] text-gray-400">
+            Will be uploaded to Cloudinary on publish
+          </span>
         </label>
       )}
 
@@ -726,13 +810,14 @@ function MediaBlock({ block, theme, resolved, css, onFile, onContentChange }) {
 
       {hasUrl && (
         <div className="flex items-center justify-between text-[10px] text-gray-400">
-          <span className="truncate">{block.meta.url}</span>
+          <span className="truncate">{block.meta?.fileName || block.meta.url}</span>
           <label className="cursor-pointer hover:text-primary shrink-0">
             Replace
             <input
               type="file"
+              accept={accept}
               className="hidden"
-              onChange={(e) => onFile("url", e.target.files?.[0])}
+              onChange={(e) => onFile(e.target.files?.[0])}
             />
           </label>
         </div>
@@ -741,9 +826,6 @@ function MediaBlock({ block, theme, resolved, css, onFile, onContentChange }) {
   );
 }
 
-// ─────────────────────────────────────────────
-// Campaign Theme panel
-// ─────────────────────────────────────────────
 function CampaignThemePanel({ theme, setTheme }) {
   return (
     <div className="p-4 space-y-5">
@@ -811,9 +893,6 @@ function CampaignThemePanel({ theme, setTheme }) {
   );
 }
 
-// ─────────────────────────────────────────────
-// Block Style panel
-// ─────────────────────────────────────────────
 function BlockStylePanel({ block, onStyle, onClose }) {
   const s = block.style || {};
   const setStyle = (k, v) => onStyle(k, v);
@@ -959,9 +1038,6 @@ function ChipRow({ value, options, onSelect }) {
   );
 }
 
-// ─────────────────────────────────────────────
-// Phone preview block
-// ─────────────────────────────────────────────
 function PreviewBlock({ block, theme }) {
   const resolved = resolveStyle(theme, block.style);
   const css = styleToCss(resolved);

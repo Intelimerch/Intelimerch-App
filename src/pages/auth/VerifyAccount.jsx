@@ -1,13 +1,28 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import AuthCard from '../../components/AuthCard'
-import { Mail, ArrowLeft } from 'lucide-react'
+import { Mail, ArrowLeft, Loader2, AlertCircle } from 'lucide-react'
+import { authAPI } from '../../services/apiClient'
 
 export default function VerifyAccount() {
   const navigate = useNavigate()
+  const location = useLocation()
+  
+  // State passed from previous step
+  const email = location.state?.email
+  const flow = location.state?.flow || 'confirm-email' // 'confirm-email' or 'reset-password'
+
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [timeLeft, setTimeLeft] = useState(60)
   const [expired, setExpired] = useState(false)
+  
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // If someone lands here directly without an email, send them back
+  useEffect(() => {
+    if (!email) navigate('/forgot-password')
+  }, [email, navigate])
 
   useEffect(() => {
     if (timeLeft <= 0) { setExpired(true); return }
@@ -25,14 +40,61 @@ export default function VerifyAccount() {
 
   const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 
-  const resend = () => { setTimeLeft(60); setExpired(false); setOtp(['','','','','','']) }
+  const handleSubmit = async () => {
+    const otpString = otp.join('')
+    if (otpString.length !== 6) return setError('Please enter all 6 digits.')
+    
+    setLoading(true)
+    setError('')
+    
+    try {
+      if (flow === 'confirm-email') {
+        // POST /auth/confirm-email
+        await authAPI.confirmEmail(email, otpString)
+        // Typically, email confirmation logs the user in, or sends them to login
+        navigate('/signin', { state: { message: 'Email confirmed! Please log in.' } })
+      } else {
+        // POST /auth/forgot-password/verify-otp
+        const res = await authAPI.verifyPasswordOtp(email, otpString)
+        
+        // The API returns a resetToken
+        const resetToken = res.data?.resetToken || res.resetToken
+        
+        // Pass token and email to the final reset screen
+        navigate('/reset-password', { 
+          state: { email, resetToken } 
+        })
+      }
+    } catch (err) {
+      setError(err.message || 'Invalid OTP. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resend = async () => {
+    setTimeLeft(60)
+    setExpired(false)
+    setOtp(['','','','','',''])
+    setError('')
+    
+    if (flow === 'reset-password') {
+      try {
+        await authAPI.requestPasswordOtp(email)
+      } catch (err) {
+        setError('Failed to resend OTP.')
+      }
+    }
+  }
 
   return (
     <AuthCard>
       <button onClick={() => navigate(-1)} className="mb-4 text-gray-500 hover:text-gray-700">
         <ArrowLeft size={20} />
       </button>
-      <h1 className="text-2xl font-bold text-center text-gray-900 mb-4">Verify account</h1>
+      <h1 className="text-2xl font-bold text-center text-gray-900 mb-4">
+        {flow === 'confirm-email' ? 'Verify Account' : 'Verify Reset'}
+      </h1>
 
       <div className="flex justify-center mb-3">
         <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center">
@@ -41,9 +103,16 @@ export default function VerifyAccount() {
       </div>
 
       <p className="text-sm text-gray-600 text-center mb-5">
-        We've sent a code to{' '}
-        <span className="font-semibold text-gray-900">a*****@example.com</span>
+        We've sent a code to <br/>
+        <span className="font-semibold text-gray-900">{email}</span>
       </p>
+
+      {error && (
+        <div className="mb-4 bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
+          <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
 
       <p className="text-xs font-medium text-gray-600 text-center mb-3">Enter OTP</p>
       <div className="flex justify-center gap-2 mb-4">
@@ -64,12 +133,17 @@ export default function VerifyAccount() {
         <span className="text-primary font-semibold">{fmt(timeLeft)}</span>
       </p>
 
-      <button onClick={() => navigate('/dashboard')} className="btn-primary mb-3">
-        {expired ? 'Verify OTP' : 'Verify Account'}
+      <button 
+        onClick={handleSubmit} 
+        disabled={loading || otp.join('').length !== 6}
+        className="btn-primary mb-3 w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+      >
+        {loading && <Loader2 size={18} className="animate-spin" />}
+        {loading ? 'Verifying...' : 'Verify OTP'}
       </button>
 
       {expired ? (
-        <button onClick={resend} className="text-primary font-semibold text-sm text-center w-full">
+        <button onClick={resend} className="text-primary font-semibold text-sm text-center w-full hover:underline">
           Resend OTP
         </button>
       ) : (

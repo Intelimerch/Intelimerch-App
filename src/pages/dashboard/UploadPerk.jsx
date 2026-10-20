@@ -8,7 +8,7 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { perksAPI } from "../../services/apiClient";
 import { useFormPersistence } from "../../hooks/useFormPersistence";
 
@@ -16,24 +16,56 @@ const contentTypes = [
   { label: "Video", value: "video" },
   { label: "Image", value: "image" },
   { label: "Link", value: "link" },
-  { label: "Document", value: "document" },
+  // { label: "Document", value: "document" },
 ];
 
-// GET /admin/perks/categories is intermittently flaky on the backend
-// (confirmed via curl — same failure outside the browser entirely, not a
-// frontend bug). These are real, confirmed category IDs to fall back to
-// so the form stays usable when the live fetch fails.
-// FIXED: Removed duplicate "Premium Access" and replaced with "VIP Access"
+// Updated categories to Supporter, Insider, Superfan, Inner Circle.
+// Mapped to the existing IDs. Update the `_id` values if your backend
+// uses different IDs for these specific tiers.
 const KNOWN_CATEGORIES = [
-  { _id: "6a47f7bd57683e966000296e", name: "Classic Access" },
-  { _id: "6a47dff4b09ae7642a078972", name: "Premium Access" },
-  { _id: "6a494f1aa4164eab48bf52aa", name: "VIP Access" },
+  { _id: "6a47f7bd57683e966000296e", name: "Supporter" },
+  { _id: "6a47dff4b09ae7642a078972", name: "Insider" },
+  { _id: "6a494f1aa4164eab48bf52aa", name: "Superfan" },
+  { _id: "6a494f1aa4164eab48bf52bb", name: "Inner Circle" },
 ];
+
+const isImageFile = (f) => !!f && f.type.startsWith("image/");
+const isVideoFile = (f) => !!f && f.type.startsWith("video/");
+const isDocumentFile = (f) =>
+  !!f &&
+  (f.type === "application/pdf" ||
+    f.type.startsWith("application/msword") ||
+    f.type.includes("officedocument") ||
+    f.type.startsWith("text/"));
+
+const FILE_VALIDATORS = {
+  image: {
+    test: isImageFile,
+    error: "That's not an image. Please choose an image file.",
+    accept: "image/*",
+  },
+  video: {
+    test: isVideoFile,
+    error: "That's not a video. Please choose a video file.",
+    accept: "video/*",
+  },
+  document: {
+    test: isDocumentFile,
+    error: "That's not a supported document. Use PDF, DOC, DOCX, or TXT.",
+    accept: ".pdf,.doc,.docx,.txt,application/pdf",
+  },
+};
 
 function parseErrorMessage(error) {
   const message = error?.message || "";
   if (message.includes("E11000") || message.includes("duplicate key")) {
     return "A perk with this name already exists. Please use a different name.";
+  }
+  if (message.includes("No file attached") || message.includes("file is required")) {
+    return "Please upload a file for this perk.";
+  }
+  if (message.includes("Uploaded file type does not match")) {
+    return "The file type doesn't match the content type you selected.";
   }
   if (message.includes("perkCategoryId"))
     return "Please select a valid perk category.";
@@ -57,7 +89,6 @@ export default function UploadPerk() {
   const [showTypeDrop, setShowTypeDrop] = useState(false);
   const [showCatDrop, setShowCatDrop] = useState(false);
 
-  // ✅ Use useFormPersistence for all form fields
   const [formData, setFormData, clearSavedForm] = useFormPersistence(
     "artist_upload_perk",
     {
@@ -65,10 +96,16 @@ export default function UploadPerk() {
       selectedType: null,
       selectedCategory: null,
       description: "",
-      fileName: "",
-      file: null,
+      linkUrl: "",
     },
   );
+
+  const fileSlotsRef = useRef({
+    image: { file: null, previewUrl: null, fileName: "" },
+    video: { file: null, previewUrl: null, fileName: "" },
+    document: { file: null, previewUrl: null, fileName: "" },
+  });
+  const [, forceRender] = useState(0);
 
   const [categories, setCategories] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -84,14 +121,21 @@ export default function UploadPerk() {
       try {
         const res = await perksAPI.getCategories();
         const live = res.data || [];
-        
-        // ─── FIXED: Deduplicate categories by name ───
+
+        // Deduplicate the live categories by name
         const deduped = live.filter((cat, index, self) =>
           index === self.findIndex(c => c.name === cat.name)
         );
-        
-        console.log('📋 Categories loaded:', deduped);
-        setCategories(deduped.length > 0 ? deduped : KNOWN_CATEGORIES);
+
+        // IMPORTANT: If your backend returns the old categories 
+        // (Classic Access, Premium Access, VIP Access), this will 
+        // overwrite the new ones. To strictly enforce your new list,
+        // we only use the live categories if they match the new names.
+        const hasNewCategories = deduped.some(cat => 
+          ["Supporter", "Insider", "Superfan", "Inner Circle"].includes(cat.name)
+        );
+
+        setCategories(hasNewCategories ? deduped : KNOWN_CATEGORIES);
       } catch (err) {
         console.error(
           "Failed to load perk categories, using known fallback:",
@@ -105,65 +149,134 @@ export default function UploadPerk() {
     loadCategories();
   }, []);
 
-  const handleFile = (f) => {
-    if (!f) return;
-    setFormData((prev) => ({ ...prev, fileName: f.name, file: f }));
+  useEffect(() => {
+    return () => {
+      Object.values(fileSlotsRef.current).forEach((slot) => {
+        if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+      });
+    };
+  }, []);
+
+  const clearSlot = (type) => {
+    const slot = fileSlotsRef.current[type];
+    if (!slot) return;
+    if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+    fileSlotsRef.current[type] = {
+      file: null,
+      previewUrl: null,
+      fileName: "",
+    };
+    forceRender((n) => n + 1);
+  };
+
+  const handleFile = (type, f) => {
+    if (!f) {
+      clearSlot(type);
+      return;
+    }
+    const validator = FILE_VALIDATORS[type];
+    if (validator && !validator.test(f)) {
+      setFieldError(validator.error);
+      return;
+    }
+    setFieldError("");
+
+    const slot = fileSlotsRef.current[type];
+    if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+
+    fileSlotsRef.current[type] = {
+      file: f,
+      previewUrl:
+        type === "document" ? null : URL.createObjectURL(f),
+      fileName: f.name,
+    };
+    forceRender((n) => n + 1);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
-    handleFile(e.dataTransfer.files?.[0]);
+    const type = formData.selectedType?.value;
+    if (!type || type === "link") return;
+    handleFile(type, e.dataTransfer.files?.[0]);
   };
 
   const handleSubmit = async () => {
-  setFieldError("");
-  setUiError(null);
+    setFieldError("");
+    setUiError(null);
 
-  if (!formData.perkName.trim()) {
-    setFieldError("Perk name is required");
-    return;
-  }
-  if (!formData.selectedCategory) {
-    setFieldError("Please choose a perk category");
-    return;
-  }
-  if (!formData.selectedType) {
-    setFieldError("Please choose a content type");
-    return;
-  }
+    if (!formData.perkName.trim()) {
+      setFieldError("Perk name is required");
+      return;
+    }
+    if (!formData.selectedCategory) {
+      setFieldError("Please choose a perk category");
+      return;
+    }
+    if (!formData.selectedType) {
+      setFieldError("Please choose a content type");
+      return;
+    }
 
-  setSubmitting(true);
-  try {
-    const payload = {
-      perkName: formData.perkName.trim(),
-      perkCategoryId: formData.selectedCategory._id,
-      contentType: formData.selectedType.value,
-      // POST /perks is JSON-only and requires fileUrl (string).
-      // No upload endpoint exists yet, so this is a placeholder.
-      fileUrl: formData.file
-        ? `https://placeholder.intelimerch.com/pending-upload/${encodeURIComponent(formData.file.name)}`
-        : "https://placeholder.intelimerch.com/pending-upload/none",
-    };
-    if (formData.description.trim())
-      payload.description = formData.description.trim();
+    const type = formData.selectedType.value;
+    let fileToUpload = null;
 
-    const response = await perksAPI.create(payload);
-    console.log("✅ Perk created:", response);
-    clearSavedForm();
-    navigate("/dashboard/perks");
-  } catch (err) {
-    console.error("Failed to create perk:", err);
-    setUiError(parseErrorMessage(err));
-  } finally {
-    setSubmitting(false);
-  }
-};
+    if (type === "link") {
+      if (!formData.linkUrl.trim()) {
+        setFieldError("Please enter a URL for this link perk.");
+        return;
+      }
+    } else {
+      fileToUpload = fileSlotsRef.current[type]?.file || null;
+      if (!fileToUpload) {
+        setFieldError("Please upload a file for this perk.");
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      const payload = {
+        perkName: formData.perkName.trim(),
+        perkCategoryId: formData.selectedCategory._id,
+        contentType: type,
+      };
+      if (formData.description.trim())
+        payload.description = formData.description.trim();
+      if (type === "link") payload.linkUrl = formData.linkUrl.trim();
+
+      const response = await perksAPI.create(payload, fileToUpload);
+      console.log("✅ Perk created:", response);
+      clearSavedForm();
+      Object.values(fileSlotsRef.current).forEach((slot) => {
+        if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+      });
+      fileSlotsRef.current = {
+        image: { file: null, previewUrl: null, fileName: "" },
+        video: { file: null, previewUrl: null, fileName: "" },
+        document: { file: null, previewUrl: null, fileName: "" },
+      };
+      navigate("/dashboard/perks");
+    } catch (err) {
+      console.error("Failed to create perk:", err);
+      setUiError(parseErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleBack = () => {
-    clearSavedForm(); // ✅ Clear when navigating away
+    clearSavedForm();
     navigate("/dashboard/perks");
   };
+
+  const activeType = formData.selectedType?.value;
+  const activeSlot =
+    activeType && activeType !== "link"
+      ? fileSlotsRef.current[activeType]
+      : null;
+  const validator =
+    activeType && activeType !== "link" ? FILE_VALIDATORS[activeType] : null;
 
   return (
     <div>
@@ -182,7 +295,7 @@ export default function UploadPerk() {
         </button>
       </div>
 
-      <div className="card max-w-4xl">
+      <div className="card max-w-2xl">
         <h2 className="text-lg font-bold text-gray-900 mb-5">Perk Details</h2>
 
         {uiError && (
@@ -307,6 +420,7 @@ export default function UploadPerk() {
                       key={t.value}
                       type="button"
                       onClick={() => {
+                        setFieldError("");
                         setFormData((prev) => ({ ...prev, selectedType: t }));
                         setShowTypeDrop(false);
                       }}
@@ -323,35 +437,93 @@ export default function UploadPerk() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-              Upload File
-            </label>
-            <label
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-xl py-10 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${dragging ? "border-primary bg-primary-light" : "border-gray-300 hover:border-primary hover:bg-gray-50"}`}
-            >
+          {activeType === "link" && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Perk URL <span className="text-red-500">*</span>
+              </label>
               <input
-                type="file"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0])}
+                type="url"
+                className="input-field w-full"
+                placeholder="https://example.com/exclusive-content"
+                value={formData.linkUrl}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, linkUrl: e.target.value }))
+                }
                 disabled={submitting}
               />
-              <Video size={18} className="text-primary" />
-              <span className="text-sm text-gray-500">
-                {formData.fileName || "Tap to upload, or drag a file here"}
-              </span>
-            </label>
-            <p className="text-xs text-gray-400 mt-1">
-              File uploads aren't supported on creation yet — this sends a
-              placeholder URL for testing.
-            </p>
-          </div>
+            </div>
+          )}
+
+          {activeType && activeType !== "link" && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Upload File <span className="text-red-500">*</span>
+              </label>
+
+              {activeSlot?.fileName ? (
+                <div className="relative border rounded-xl overflow-hidden">
+                  {activeSlot.previewUrl && activeType === "image" && (
+                    <img
+                      src={activeSlot.previewUrl}
+                      alt="Perk preview"
+                      className="w-full max-h-48 object-contain bg-black"
+                    />
+                  )}
+                  {activeSlot.previewUrl && activeType === "video" && (
+                    <video
+                      src={activeSlot.previewUrl}
+                      controls
+                      className="w-full max-h-48 object-contain bg-black"
+                    />
+                  )}
+                  <div className="flex items-center justify-between p-2 bg-gray-50 border-t">
+                    <span className="text-xs text-gray-600 truncate">
+                      {activeSlot.fileName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => clearSlot(activeType)}
+                      disabled={submitting}
+                      className="text-red-500 hover:text-red-600 p-1"
+                      title="Remove file"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl py-10 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${dragging ? "border-primary bg-primary-light" : "border-gray-300 hover:border-primary hover:bg-gray-50"}`}
+                >
+                  <input
+                    type="file"
+                    accept={validator?.accept}
+                    className="hidden"
+                    onChange={(e) => {
+                      handleFile(activeType, e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                    disabled={submitting}
+                  />
+                  <Video size={18} className="text-primary" />
+                  <span className="text-sm text-gray-500">
+                    Tap to upload, or drag a file here
+                  </span>
+                </label>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                Upload a file for image, video, audio, or document perks. For
+                link perks, a URL is enough.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1.5">

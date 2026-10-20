@@ -1,9 +1,32 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import AuthCard from '../../components/AuthCard'
-import { HelpCircle, MessageSquare, Mail, ArrowLeft, Home } from 'lucide-react'
+import { HelpCircle, MessageSquare, ArrowLeft, Home, Loader2, AlertCircle } from 'lucide-react'
+import { authAPI } from '../../services/apiClient'
 
 export default function ForgotPassword() {
   const navigate = useNavigate()
+  const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSendOtp = async (e) => {
+    e.preventDefault()
+    if (!email.trim()) return setError('Please enter your email.')
+    
+    setLoading(true)
+    setError('')
+    try {
+      await authAPI.requestPasswordOtp(email.trim())
+      // Pass the email to the next step via state
+      navigate('/verify', { state: { email: email.trim(), flow: 'reset-password' } })
+    } catch (err) {
+      setError(err.message || 'Failed to send OTP. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <AuthCard>
       <div className="flex justify-center mb-4">
@@ -23,37 +46,45 @@ export default function ForgotPassword() {
         <StepCircle num={3} label="Reset" />
       </div>
 
-      <div className="space-y-4">
+      {error && (
+        <div className="mb-4 bg-red-50 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2">
+          <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSendOtp} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">Email or Phone</label>
-          <input className="input-field" placeholder="Enter your email or phone" />
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+          <input 
+            type="email"
+            className="input-field" 
+            placeholder="Enter your email" 
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
+          />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => navigate('/verify')}
-            className="border border-gray-800 text-gray-800 rounded-xl py-3 flex items-center justify-center gap-2 text-sm font-semibold hover:bg-gray-50 transition-all"
-          >
-            <MessageSquare size={16} /> Send OTP
-          </button>
-          <button
-            onClick={() => navigate('/verify')}
-            className="btn-primary"
-          >
-            <Mail size={16} /> Send Link
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="btn-primary w-full py-3 flex items-center justify-center gap-2"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <MessageSquare size={16} />}
+          {loading ? 'Sending...' : 'Send OTP'}
+        </button>
 
-        <button onClick={() => navigate('/signin')} className="flex items-center gap-2 text-sm text-gray-700 font-medium mx-auto hover:text-gray-900">
+        <button type="button" onClick={() => navigate('/signin')} className="flex items-center gap-2 text-sm text-gray-700 font-medium mx-auto hover:text-gray-900 mt-4">
           <ArrowLeft size={16} /> Back to Login
         </button>
 
-        <p className="text-center text-sm text-gray-500">
+        <p className="text-center text-sm text-gray-500 mt-4">
           <Home size={13} className="inline text-primary mr-1" />
           <em>Need help? </em>
           <span className="text-primary font-semibold cursor-pointer">Contact Support</span>
         </p>
-      </div>
+      </form>
     </AuthCard>
   )
 }

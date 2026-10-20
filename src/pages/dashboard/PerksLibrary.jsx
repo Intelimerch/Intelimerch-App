@@ -1,5 +1,5 @@
 // src/pages/dashboard/PerksLibrary.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Upload,
@@ -25,35 +25,64 @@ const typeBadge = {
   video: "bg-red-50 text-red-500",
   link: "bg-purple-50 text-purple-500",
   image: "bg-teal-50 text-teal-600",
-  document: "bg-yellow-50 text-yellow-600",
+  // document: "bg-yellow-50 text-yellow-600",
 };
 
 const typeIconMap = {
   video: Video,
   link: Link2,
   image: Image,
-  document: FileText,
+  // document: FileText,
 };
 const typeIconBg = {
   video: "bg-red-50",
   link: "bg-purple-50",
   image: "bg-teal-50",
-  document: "bg-yellow-50",
+  // document: "bg-yellow-50",
 };
 const typeIconColor = {
   video: "text-red-400",
   link: "text-purple-400",
   image: "text-teal-400",
-  document: "text-yellow-500",
+  // document: "text-yellow-500",
 };
 
 const statusMap = { active: "Active", expired: "Expired", draft: "Draft" };
 
 const KNOWN_CATEGORIES = [
-  { _id: "6a47f7bd57683e966000296e", name: "Classic Access" },
-  { _id: "6a47dff4b09ae7642a078972", name: "Premium Access" },
-  { _id: "6a494f1aa4164eab48bf52aa", name: "Premium Access" },
+  { _id: "6a47f7bd57683e966000296e", name: "Supporter" },
+  { _id: "6a47dff4b09ae7642a078972", name: "Insider" },
+  { _id: "6a494f1aa4164eab48bf52aa", name: "Superfan" },
+  { _id: "6a494f1aa4164eab48bf52bb", name: "Inner Circle" },
 ];
+
+// Validators for the edit modal
+const isImageFile = (f) => !!f && f.type.startsWith("image/");
+const isVideoFile = (f) => !!f && f.type.startsWith("video/");
+const isDocumentFile = (f) =>
+  !!f &&
+  (f.type === "application/pdf" ||
+    f.type.startsWith("application/msword") ||
+    f.type.includes("officedocument") ||
+    f.type.startsWith("text/"));
+
+const FILE_VALIDATORS = {
+  image: {
+    test: isImageFile,
+    error: "That's not an image. Please choose an image file.",
+    accept: "image/*",
+  },
+  video: {
+    test: isVideoFile,
+    error: "That's not a video. Please choose a video file.",
+    accept: "video/*",
+  },
+  document: {
+    test: isDocumentFile,
+    error: "That's not a supported document. Use PDF, DOC, DOCX, or TXT.",
+    accept: ".pdf,.doc,.docx,.txt,application/pdf",
+  },
+};
 
 function parseErrorMessage(error) {
   const message = error?.message || "";
@@ -69,6 +98,9 @@ function parseErrorMessage(error) {
     return "Something went wrong on our server. Please try again later.";
   if (message.includes("ECONNREFUSED") || message.includes("NetworkError"))
     return "Cannot connect to the server. Please check your internet connection.";
+  if (message.includes("Uploaded file type does not match")) {
+    return "The file type doesn't match the content type you selected.";
+  }
   return message || "An unexpected error occurred. Please try again.";
 }
 
@@ -103,9 +135,14 @@ export default function PerksLibrary() {
       description: "",
       perkCategoryId: "",
       status: "Active",
-      file: null,
     },
   );
+
+  // File state for the edit modal
+  const editFileRef = useRef(null);
+  const [editPreviewUrl, setEditPreviewUrl] = useState(null);
+  const [editFileName, setEditFileName] = useState("");
+  const [, forceRender] = useState(0);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uiError, setUiError] = useState(null);
@@ -147,7 +184,13 @@ export default function PerksLibrary() {
       try {
         const res = await perksAPI.getCategories();
         const live = res.data || [];
-        setCategories(live.length > 0 ? live : KNOWN_CATEGORIES);
+        const deduped = live.filter((cat, index, self) =>
+          index === self.findIndex(c => c.name === cat.name)
+        );
+        const hasNewCategories = deduped.some(cat => 
+          ["Supporter", "Insider", "Superfan", "Inner Circle"].includes(cat.name)
+        );
+        setCategories(hasNewCategories ? deduped : KNOWN_CATEGORIES);
       } catch (err) {
         console.error(
           "Failed to load perk categories, using known fallback:",
@@ -186,6 +229,41 @@ export default function PerksLibrary() {
   const closeDeleteModal = () =>
     setDeleteModal({ isOpen: false, perkId: null, perkName: "" });
 
+  const clearEditFile = () => {
+    editFileRef.current = null;
+    if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+    setEditPreviewUrl(null);
+    setEditFileName("");
+    forceRender((n) => n + 1);
+  };
+
+  const handleEditFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      clearEditFile();
+      return;
+    }
+
+    // Validate based on current editForm.contentType
+    const validator = FILE_VALIDATORS[editForm.contentType];
+    if (validator && !validator.test(file)) {
+      setUiError(validator.error);
+      e.target.value = "";
+      return;
+    }
+
+    setUiError(null);
+    
+    if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+    
+    editFileRef.current = file;
+    setEditPreviewUrl(
+      editForm.contentType === "document" ? null : URL.createObjectURL(file)
+    );
+    setEditFileName(file.name);
+    forceRender((n) => n + 1);
+  };
+
   const saveEdit = async () => {
     if (!editingPerk) return;
     const id = editingPerk._id || editingPerk.id;
@@ -193,15 +271,21 @@ export default function PerksLibrary() {
     setIsSubmitting(true);
     setUiError(null);
     try {
+      // Build payload for multipart/form-data
       const fields = {
         perkName: editForm.perkName,
         contentType: editForm.contentType,
         description: editForm.description || "",
       };
-      if (editForm.perkCategoryId)
+      if (editForm.perkCategoryId) {
         fields.perkCategoryId = editForm.perkCategoryId;
+      }
 
-      const updated = await perksAPI.updateJson(id, fields);
+      const fileToUpload = editFileRef.current;
+
+      // Use the updated perksAPI.update which handles FormData
+      const updated = await perksAPI.update(id, fields, fileToUpload);
+      
       console.log("Update response:", updated);
       await fetchPerks();
 
@@ -225,14 +309,16 @@ export default function PerksLibrary() {
       description: perk.description || "",
       perkCategoryId: perk.perkCategoryId?._id || perk.perkCategoryId || "",
       status: statusMap[status.toLowerCase()] || "Active",
-      file: null,
     });
 
+    // Reset any previously staged file
+    clearEditFile();
     setEditingPerk(perk);
   };
 
   const closeEdit = () => {
     clearEditForm();
+    clearEditFile();
     setEditingPerk(null);
     setShowCatDrop(false);
   };
@@ -249,6 +335,8 @@ export default function PerksLibrary() {
   const selectedCategory = categories.find(
     (c) => c._id === editForm.perkCategoryId,
   );
+
+  const activeValidator = FILE_VALIDATORS[editForm.contentType];
 
   if (loading) {
     return (
@@ -416,17 +504,80 @@ export default function PerksLibrary() {
                 </label>
                 <select
                   value={editForm.contentType}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, contentType: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setEditForm((f) => ({ ...f, contentType: e.target.value }));
+                    // Clear staged file if they change type, to avoid MIME mismatch
+                    clearEditFile(); 
+                  }}
                   className="input-field w-full"
                 >
                   <option value="video">Video</option>
                   <option value="link">Link</option>
                   <option value="image">Image</option>
-                  <option value="document">Document</option>
+                  {/* <option value="document">Document</option> */}
                 </select>
               </div>
+
+              {/* File Upload Section for Edit */}
+              {editForm.contentType !== "link" && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                    Replace File (optional)
+                  </label>
+
+                  {editFileName ? (
+                    <div className="relative border rounded-xl overflow-hidden bg-gray-50">
+                      {editPreviewUrl && editForm.contentType === "image" && (
+                        <img
+                          src={editPreviewUrl}
+                          alt="Preview"
+                          className="w-full max-h-32 object-contain bg-black"
+                        />
+                      )}
+                      {editPreviewUrl && editForm.contentType === "video" && (
+                        <video
+                          src={editPreviewUrl}
+                          controls
+                          className="w-full max-h-32 object-contain bg-black"
+                        />
+                      )}
+                      {editForm.contentType === "document" && (
+                        <div className="flex items-center justify-center py-6">
+                          <FileText size={32} className="text-primary" />
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between p-2 bg-white border-t">
+                        <span className="text-xs text-gray-600 truncate">
+                          {editFileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={clearEditFile}
+                          disabled={isSubmitting}
+                          className="text-red-500 hover:text-red-600 p-1"
+                          title="Remove file"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed border-gray-300 rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer hover:border-primary hover:bg-gray-50 transition-all">
+                      <input
+                        type="file"
+                        accept={activeValidator?.accept}
+                        className="hidden"
+                        onChange={handleEditFile}
+                        disabled={isSubmitting}
+                      />
+                      <Upload size={16} className="text-gray-400" />
+                      <span className="text-xs text-gray-500">
+                        Tap to upload a new {editForm.contentType}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">
@@ -450,7 +601,7 @@ export default function PerksLibrary() {
                   <button
                     type="button"
                     onClick={() => setShowCatDrop((o) => !o)}
-                    disabled={loadingCategories}
+                    disabled={loadingCategories || isSubmitting}
                     className="input-field w-full text-left flex items-center justify-between"
                   >
                     <span
@@ -508,7 +659,8 @@ export default function PerksLibrary() {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={closeEdit}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all"
+                disabled={isSubmitting}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50"
               >
                 Cancel
               </button>

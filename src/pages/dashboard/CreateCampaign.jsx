@@ -1,5 +1,5 @@
-
-import { useState, useEffect } from "react";
+// src/pages/dashboard/CreateCampaign.jsx
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Calendar,
@@ -10,17 +10,21 @@ import {
   AlertCircle,
   CheckCircle,
   Check,
+  X,
 } from "lucide-react";
 import { campaignAPI, perksAPI } from "../../services/apiClient";
 import { useFormPersistence } from "../../hooks/useFormPersistence";
 
-// ─── TEMP: Cloudinary not yet set up on backend ───
-// Only "link" is enabled. Restore "image" / "video" once the backend
-// supports multipart uploads again.
-const mediaTypes = ["link"];
-// const mediaTypes = ["image", "video", "link"];  // ← restore later
+const mediaTypes = ["image", "video", "link"];
 
-function validateCampaign(data) {
+// ── Strict MIME checks ──
+const isImageFile = (file) =>
+  !!file && file.type && file.type.startsWith("image/");
+
+const isVideoFile = (file) =>
+  !!file && file.type && file.type.startsWith("video/");
+
+function validateCampaign(data, mediaByType) {
   const errors = {};
   if (!data.campaignName || data.campaignName.trim().length === 0) {
     errors.campaignName = "Campaign name is required";
@@ -35,9 +39,16 @@ function validateCampaign(data) {
   if (!data.selectedPerkIds || data.selectedPerkIds.length === 0) {
     errors.perks = "Select at least one perk";
   }
-  // Require mediaUrl when link type is used
-  if (data.mediaType === "link" && (!data.mediaUrl || !data.mediaUrl.trim())) {
-    errors.mediaUrl = "Media URL is required";
+
+  if (data.mediaType === "link") {
+    if (!data.mediaUrl || !data.mediaUrl.trim()) {
+      errors.mediaUrl = "Media URL is required";
+    }
+  } else {
+    const slot = mediaByType[data.mediaType];
+    if (!slot?.file) {
+      errors.mediaFile = `Please upload ${data.mediaType === "image" ? "an image" : "a video"}.`;
+    }
   }
   return errors;
 }
@@ -45,6 +56,7 @@ function validateCampaign(data) {
 export default function CreateCampaign() {
   const navigate = useNavigate();
 
+  // Persisted form data — NO File objects here
   const [formData, setFormData, clearSavedForm] = useFormPersistence(
     "artist_create_campaign",
     {
@@ -52,13 +64,22 @@ export default function CreateCampaign() {
       status: "active",
       startDate: "",
       endDate: "",
-      mediaType: "link",
-      mediaFileName: "",
-      mediaFile: null,
+      mediaType: "image",
       mediaUrl: "",
       selectedPerkIds: [],
     }
   );
+
+  // Per-media-type slot: { file, previewUrl, fileName }
+  // Stored in a ref so File objects survive re-renders (and aren't
+  // stripped by useFormPersistence, which can't serialize Files).
+  const mediaSlotsRef = useRef({
+    image: { file: null, previewUrl: null, fileName: "" },
+    video: { file: null, previewUrl: null, fileName: "" },
+  });
+
+  // Nonce to force re-render when ref changes
+  const [, forceRender] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
@@ -83,6 +104,15 @@ export default function CreateCampaign() {
     loadPerks();
   }, []);
 
+  // Revoke any preview URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(mediaSlotsRef.current).forEach((slot) => {
+        if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+      });
+    };
+  }, []);
+
   const togglePerk = (id) => {
     setFormData((prev) => ({
       ...prev,
@@ -100,6 +130,65 @@ export default function CreateCampaign() {
     if (success) setSuccess(false);
   };
 
+  const clearSlot = (type) => {
+    const slot = mediaSlotsRef.current[type];
+    if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+    mediaSlotsRef.current[type] = {
+      file: null,
+      previewUrl: null,
+      fileName: "",
+    };
+    forceRender((n) => n + 1);
+  };
+
+  const handleFileChange = (type, e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      clearSlot(type);
+      return;
+    }
+
+    // Strict type check — reject the wrong kind of file
+    if (type === "image" && !isImageFile(file)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        mediaFile: "That's not an image. Please choose an image file.",
+      }));
+      e.target.value = ""; // reset input
+      return;
+    }
+    if (type === "video" && !isVideoFile(file)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        mediaFile: "That's not a video. Please choose a video file.",
+      }));
+      e.target.value = "";
+      return;
+    }
+
+    // Replace any previous file in this slot
+    if (mediaSlotsRef.current[type].previewUrl) {
+      URL.revokeObjectURL(mediaSlotsRef.current[type].previewUrl);
+    }
+
+    mediaSlotsRef.current[type] = {
+      file,
+      previewUrl: URL.createObjectURL(file),
+      fileName: file.name,
+    };
+
+    setFieldErrors((prev) => ({ ...prev, mediaFile: null }));
+    if (apiError) setApiError(null);
+    if (success) setSuccess(false);
+    forceRender((n) => n + 1);
+  };
+
+  // Switch tabs WITHOUT clearing anything
+  const handleMediaTypeChange = (t) => {
+    setFieldErrors((prev) => ({ ...prev, mediaFile: null, mediaUrl: null }));
+    handleChange("mediaType", t);
+  };
+
   const handleBack = () => {
     clearSavedForm();
     navigate("/dashboard/campaigns");
@@ -111,7 +200,8 @@ export default function CreateCampaign() {
     setApiError(null);
     setSuccess(false);
 
-    const errors = validateCampaign(formData);
+    const mediaByType = mediaSlotsRef.current;
+    const errors = validateCampaign(formData, mediaByType);
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
@@ -127,27 +217,36 @@ export default function CreateCampaign() {
         endDate: new Date(formData.endDate).toISOString(),
         mediaType: formData.mediaType,
         status: formData.status,
-        // Always send mediaUrl for link type
         ...(formData.mediaType === "link" && formData.mediaUrl
           ? { mediaUrl: formData.mediaUrl.trim() }
           : {}),
       };
 
-      console.log("📤 Sending payload:", payload);
+      const fileToUpload =
+        formData.mediaType === "link"
+          ? null
+          : mediaByType[formData.mediaType].file;
 
-      // ─── TEMP: Cloudinary not yet set up — send JSON only ───
-      // The 2nd arg (file) is temporarily not passed.
-      // Restore once the backend supports multipart uploads:
-      //   const response = await campaignAPI.create(
-      //     payload,
-      //     formData.mediaType !== "link" ? formData.mediaFile : null
-      //   );
-      const response = await campaignAPI.create(payload);
+      console.log("📤 Sending payload:", payload);
+      console.log("📎 File being uploaded:", fileToUpload);
+
+      const response = await campaignAPI.create(payload, fileToUpload);
 
       console.log("✅ Campaign created:", response);
       setSuccess(true);
 
       clearSavedForm();
+      // Clean up all slots
+      ["image", "video"].forEach((t) => {
+        const slot = mediaSlotsRef.current[t];
+        if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+      });
+      mediaSlotsRef.current = {
+        image: { file: null, previewUrl: null, fileName: "" },
+        video: { file: null, previewUrl: null, fileName: "" },
+      };
+      setFormData((prev) => ({ ...prev, mediaUrl: "" }));
+      forceRender((n) => n + 1);
 
       const newCampaignId =
         response.campaign?._id ||
@@ -179,6 +278,12 @@ export default function CreateCampaign() {
         <span>{fieldErrors[field]}</span>
       </div>
     ) : null;
+
+  const activeSlot =
+    formData.mediaType !== "link" ? mediaSlotsRef.current[formData.mediaType] : null;
+
+  const isUploadType =
+    formData.mediaType === "image" || formData.mediaType === "video";
 
   return (
     <div className="w-full">
@@ -273,16 +378,12 @@ export default function CreateCampaign() {
               <label className="block text-sm font-semibold text-gray-800 mb-1.5">
                 Campaign Media
               </label>
-
-              {/* ─── TEMP: media type buttons hidden while Cloudinary is disabled ─── */}
-              {/* Restore this block once image/video uploads are re-enabled. */}
-              {/*
               <div className="flex gap-2 mb-2">
                 {mediaTypes.map((t) => (
                   <button
                     key={t}
                     type="button"
-                    onClick={() => handleChange("mediaType", t)}
+                    onClick={() => handleMediaTypeChange(t)}
                     disabled={loading || success}
                     className={`px-3 py-1.5 text-xs font-medium rounded-full capitalize transition-all ${
                       formData.mediaType === t
@@ -294,57 +395,93 @@ export default function CreateCampaign() {
                   </button>
                 ))}
               </div>
-              */}
 
-              {/* ─── TEMP: file upload UI hidden while Cloudinary is disabled ─── */}
-              {/*
-              {(formData.mediaType === "image" || formData.mediaType === "video") && (
+              {isUploadType ? (
                 <>
-                  <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
-                    <input
-                      type="file"
-                      accept={formData.mediaType === "image" ? "image/*" : "video/*"}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          setFormData((prev) => ({
-                            ...prev,
-                            mediaFileName: file.name,
-                            mediaFile: file,
-                          }));
+                  {activeSlot?.previewUrl ? (
+                    <div className="relative border rounded-xl overflow-hidden">
+                      {formData.mediaType === "image" ? (
+                        <img
+                          src={activeSlot.previewUrl}
+                          alt="Campaign banner preview"
+                          className="w-full max-h-48 object-cover"
+                        />
+                      ) : (
+                        <video
+                          src={activeSlot.previewUrl}
+                          controls
+                          className="w-full max-h-48 object-cover bg-black"
+                        />
+                      )}
+                      <div className="flex items-center justify-between p-2 bg-gray-50 border-t">
+                        <span className="text-xs text-gray-600 truncate">
+                          {activeSlot.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => clearSlot(formData.mediaType)}
+                          disabled={loading || success}
+                          className="text-red-500 hover:text-red-600 p-1"
+                          title="Remove file"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed rounded-xl py-6 flex flex-col items-center justify-center gap-1 cursor-pointer border-gray-300 hover:border-primary hover:bg-gray-50 transition-all">
+                      <input
+                        type="file"
+                        accept={
+                          formData.mediaType === "image"
+                            ? "image/*"
+                            : "video/*"
                         }
-                      }}
-                      disabled={loading || success}
-                    />
-                    <span className="text-sm text-gray-500">
-                      {formData.mediaFileName || "Tap to upload campaign banner"}
-                    </span>
-                  </label>
+                        className="hidden"
+                        onChange={(e) =>
+                          handleFileChange(formData.mediaType, e)
+                        }
+                        disabled={loading || success}
+                      />
+                      <span className="text-sm text-gray-500">
+                        Tap to upload campaign{" "}
+                        {formData.mediaType === "image" ? "image" : "video"}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {formData.mediaType === "image"
+                          ? "PNG, JPG, GIF"
+                          : "MP4, WebM, MOV"}
+                      </span>
+                    </label>
+                  )}
                   {renderError("mediaFile")}
                 </>
+              ) : (
+                <>
+                  <input
+                    type="url"
+                    className={`input-field w-full ${
+                      fieldErrors.mediaUrl
+                        ? "border-red-500 focus:ring-red-500"
+                        : ""
+                    }`}
+                    placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
+                    value={formData.mediaUrl}
+                    onChange={(e) =>
+                      handleChange("mediaUrl", e.target.value)
+                    }
+                    disabled={loading || success}
+                  />
+                  {renderError("mediaUrl")}
+                </>
               )}
-              */}
-
-              {/* Link input — always shown while Cloudinary is disabled */}
-              <input
-                type="url"
-                className={`input-field w-full ${
-                  fieldErrors.mediaUrl
-                    ? "border-red-500 focus:ring-red-500"
-                    : ""
-                }`}
-                placeholder="Enter media URL (e.g. https://example.com/image.jpg)"
-                value={formData.mediaUrl}
-                onChange={(e) => handleChange("mediaUrl", e.target.value)}
-                disabled={loading || success}
-              />
-              {renderError("mediaUrl")}
-              {/* <p className="text-xs text-gray-400 mt-1">
-                Provide a direct URL to your campaign media. File uploads are
-                temporarily disabled while we finish setting up our media
-                service.
-              </p> */}
+              <p className="text-xs text-gray-400 mt-1">
+                {formData.mediaType === "link"
+                  ? "Provide a direct URL to your media"
+                  : `Upload a ${
+                      formData.mediaType === "image" ? "image" : "video"
+                    } file for your campaign banner`}
+              </p>
             </div>
 
             <div>

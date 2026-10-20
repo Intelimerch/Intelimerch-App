@@ -1,25 +1,13 @@
+// src/pages/dashboard/Fans.jsx
 import { useState, useRef, useEffect } from 'react'
-import { Search, Users, ShoppingBag, Package, Repeat, MoreHorizontal, ChevronDown, Download, Calendar } from 'lucide-react'
-
-// Mock data for fans
-const mockFans = [
-  { id: 1, name: 'James Joshua', email: 'jamesjosh@gmail.com', category: 'Hoodie & Cap', items: 4, status: 'Active', purchaseDate: '07/16/2026' },
-  { id: 2, name: 'Adeniyi Fola', email: 'adiefola@gmail.com', category: 'T-shirt', items: 2, status: 'Active', purchaseDate: '07/14/2026' },
-  { id: 3, name: 'Peter Silas', email: 'petesilas@gmail.com', category: 'Tote bag & Hoodie', items: 6, status: 'Active', purchaseDate: '07/12/2026' },
-  { id: 4, name: 'John Drury', email: 'johndrury@gmail.com', category: 'Cap', items: 2, status: 'Active', purchaseDate: '07/10/2026' },
-  { id: 5, name: 'Anthony Paul', email: 'ppaul@gmail.com', category: 'Hoodie', items: 3, status: 'Active', purchaseDate: '07/08/2026' },
-  { id: 6, name: 'Cole James', email: 'jamescole@gmail.com', category: 'T-shirt & Hoodie', items: 5, status: 'Active', purchaseDate: '07/06/2026' },
-]
-
-// Filter options for dropdowns
-const merchTypes = ['Merch Type', 'Hoodie', 'T-shirt', 'Cap', 'Tote bag', 'Hoodie & Cap']
+import { Search, Users, ShoppingBag, Package, Repeat, MoreHorizontal, ChevronDown, Download, Calendar, Loader2, AlertCircle } from 'lucide-react'
+import { artistAPI, productAPI, campaignAPI } from '../../services/apiClient'
 
 // ─── Custom Calendar Component ──────────────────────────────
 function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const calendarRef = useRef(null)
 
-  // Close calendar when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (calendarRef.current && !calendarRef.current.contains(event.target)) {
@@ -45,7 +33,7 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
 
   const handleDayClick = (day) => {
     const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day)
-    const formatted = `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`
+    const formatted = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
     onSelectDate(formatted)
     onClose()
   }
@@ -63,7 +51,6 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
 
   return (
     <div ref={calendarRef} className="absolute top-full mt-2 z-20 bg-white border border-gray-200 rounded-xl shadow-lg p-4 w-[280px]">
-      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <button onClick={() => changeMonth(-1)} className="p-1 hover:bg-gray-100 rounded-lg transition-all">
           <ChevronDown size={16} className="rotate-90 text-gray-400" />
@@ -76,7 +63,6 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
         </button>
       </div>
 
-      {/* Days of Week */}
       <div className="grid grid-cols-7 gap-1 mb-2">
         {days.map(day => (
           <div key={day} className="text-center text-xs font-medium text-gray-400 py-1">
@@ -85,14 +71,14 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
         ))}
       </div>
 
-      {/* Days */}
       <div className="grid grid-cols-7 gap-1">
         {Array.from({ length: firstDay }).map((_, i) => (
           <div key={`empty-${i}`} className="h-9" />
         ))}
         {Array.from({ length: daysInMonth }).map((_, i) => {
           const day = i + 1
-          const isSelected = selectedDate === `${String(currentMonth.getMonth() + 1).padStart(2, '0')}/${String(day).padStart(2, '0')}/${currentMonth.getFullYear()}`
+          const currentKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const isSelected = selectedDate === currentKey
           return (
             <button
               key={day}
@@ -107,12 +93,11 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
         })}
       </div>
 
-      {/* Today button */}
       <div className="mt-3 pt-3 border-t border-gray-100">
         <button
           onClick={() => {
             const today = new Date()
-            const formatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`
+            const formatted = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
             onSelectDate(formatted)
             onClose()
           }}
@@ -128,30 +113,112 @@ function CalendarDropdown({ selectedDate, onSelectDate, onClose }) {
 // ─── Main Component ──────────────────────────────────────────
 export default function Fans() {
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedMerchType, setSelectedMerchType] = useState('All')
-  const [selectedCampaign, setSelectedCampaign] = useState('All')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  
+  // Filters (These hold the Database IDs)
+  const [selectedMerchType, setSelectedMerchType] = useState('')
+  const [selectedCampaign, setSelectedCampaign] = useState('')
   const [selectedDate, setSelectedDate] = useState('')
+  
   const [showCalendar, setShowCalendar] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [dropdownOpen, setDropdownOpen] = useState(null)
-  const itemsPerPage = 6
+  const itemsPerPage = 10 
 
-  const campaigns = ['Campaign', 'Summer Drop', 'VIP Member', 'Behind the Scenes']
-
-  const filteredFans = mockFans.filter(fan => {
-    const matchesSearch = fan.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          fan.email.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesMerch = selectedMerchType === 'All' || fan.category.includes(selectedMerchType)
-    return matchesSearch && matchesMerch
+  // API State
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [fansData, setFansData] = useState([])
+  const [stats, setStats] = useState({
+    totalFans: 0,
+    totalMerchSold: 0,
+    uniqueProducts: 0,
+    repeatBuyers: 0,
   })
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalFansCount, setTotalFansCount] = useState(0)
 
-  const totalPages = Math.ceil(filteredFans.length / itemsPerPage)
-  const startIndex = (currentPage - 1) * itemsPerPage
-  const currentFans = filteredFans.slice(startIndex, startIndex + itemsPerPage)
+  // Filter Dropdown Options State
+  const [campaignOptions, setCampaignOptions] = useState([])
+  const [merchOptions, setMerchOptions] = useState([])
+
+  // Fetch filter options (Campaigns & Products) on mount
+  useEffect(() => {
+    const fetchFilters = async () => {
+      try {
+        const [campRes, prodRes] = await Promise.all([
+          campaignAPI.getAll(1, 100), // Fetch up to 100 campaigns
+          productAPI.getAll(1, 100)   // Fetch up to 100 products
+        ]);
+        
+        setCampaignOptions(campRes.data || []);
+        setMerchOptions(prodRes.data || []);
+      } catch (err) {
+        console.error("Failed to load filter options:", err);
+      }
+    }
+    fetchFilters();
+  }, [])
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 500)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Fetch Fans Data
+  useEffect(() => {
+    let isMounted = true
+    const fetchFans = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const params = {
+          page: currentPage,
+          limit: itemsPerPage,
+        }
+        if (debouncedSearch) params.search = debouncedSearch
+        if (selectedMerchType) params.merchType = selectedMerchType
+        if (selectedCampaign) params.campaignId = selectedCampaign
+        if (selectedDate) params.purchaseDate = selectedDate
+
+        const response = await artistAPI.getFanDashboard(params)
+        
+        if (isMounted) {
+          const data = response.data || {};
+          
+          setFansData(data.fans || [])
+          setTotalPages(data.pagination?.totalPages || 1)
+          setTotalFansCount(data.pagination?.total || 0)
+          
+          if (data.summary) {
+            setStats({
+              totalFans: data.summary.totalFans || 0,
+              totalMerchSold: data.summary.totalMerchSold || 0,
+              uniqueProducts: data.summary.uniqueProducts || 0,
+              repeatBuyers: data.summary.repeatBuyers || 0,
+            })
+          }
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.error('Failed to fetch fans:', err)
+          setError(err.message || 'Failed to load fans data.')
+        }
+      } finally {
+        if (isMounted) setLoading(false)
+      }
+    }
+
+    fetchFans()
+    return () => { isMounted = false }
+  }, [debouncedSearch, selectedMerchType, selectedCampaign, selectedDate, currentPage])
 
   const handleExport = () => {
     console.log('Exporting fans data...')
   }
+
+  const startIndex = (currentPage - 1) * itemsPerPage
 
   return (
     <div>
@@ -172,7 +239,7 @@ export default function Fans() {
               <Users size={18} className="text-violet-500" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">4,826</p>
+          <p className="text-2xl font-bold text-gray-900">{stats.totalFans.toLocaleString()}</p>
           <p className="text-xs font-medium text-green-600">↑ 16% vs last month</p>
         </div>
 
@@ -183,7 +250,7 @@ export default function Fans() {
               <ShoppingBag size={18} className="text-teal-500" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">12,457</p>
+          <p className="text-2xl font-bold text-gray-900">{stats.totalMerchSold.toLocaleString()}</p>
           <p className="text-xs font-medium text-green-600">↑ 12% vs last month</p>
         </div>
 
@@ -194,7 +261,7 @@ export default function Fans() {
               <Package size={18} className="text-orange-400" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">40</p>
+          <p className="text-2xl font-bold text-gray-900">{stats.uniqueProducts.toLocaleString()}</p>
           <p className="text-xs font-medium text-green-600">↑ 8% vs last month</p>
         </div>
 
@@ -205,14 +272,15 @@ export default function Fans() {
               <Repeat size={18} className="text-blue-400" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-gray-900">1,243</p>
-          <p className="text-xs font-medium text-blue-600">70% of total fans</p>
+          <p className="text-2xl font-bold text-gray-900">{stats.repeatBuyers.toLocaleString()}</p>
+          <p className="text-xs font-medium text-blue-600">
+            {stats.totalFans > 0 ? Math.round((stats.repeatBuyers / stats.totalFans) * 100) : 0}% of total fans
+          </p>
         </div>
       </div>
 
       {/* ─── Filter Bar ─────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-gray-100">
-        {/* Search */}
         <div className="relative flex-1 min-w-[180px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
@@ -224,57 +292,68 @@ export default function Fans() {
           />
         </div>
 
-        {/* Merch Type */}
+        {/* Merch Type Dropdown (Using Real Product IDs) */}
         <div className="relative">
           <select
             value={selectedMerchType}
-            onChange={(e) => setSelectedMerchType(e.target.value)}
-            className="px-4 py-2 pr-8 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white"
+            onChange={(e) => { setSelectedMerchType(e.target.value); setCurrentPage(1); }}
+            className="px-4 py-2 pr-8 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white min-w-[150px]"
           >
-            {merchTypes.map(type => (
-              <option key={type} value={type}>{type}</option>
-            ))}
+            <option value="">All Merch</option>
+            {merchOptions.map(prod => {
+              const productName = prod.product?.productName || prod.productName || 'Unnamed Product'
+              return (
+                <option key={prod._id} value={prod._id}>{productName}</option>
+              )
+            })}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Purchase Date with Calendar */}
+        {/* Purchase Date */}
         <div className="relative">
           <div className="relative">
             <input
               type="text"
               placeholder="Purchase Date"
-              value={selectedDate}
+              value={selectedDate ? new Date(selectedDate).toLocaleDateString() : ''}
               readOnly
               onClick={() => setShowCalendar(!showCalendar)}
               className="text-center px-1 py-2 pl-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white w-[140px] cursor-pointer"
             />
-            {/* <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /> */}
+            {selectedDate && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); setSelectedDate(''); setCurrentPage(1); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            )}
           </div>
           {showCalendar && (
             <CalendarDropdown
               selectedDate={selectedDate}
-              onSelectDate={(date) => setSelectedDate(date)}
+              onSelectDate={(date) => { setSelectedDate(date); setCurrentPage(1); }}
               onClose={() => setShowCalendar(false)}
             />
           )}
         </div>
 
-        {/* Campaign */}
+        {/* Campaign Dropdown (Using Real Campaign IDs) */}
         <div className="relative">
           <select
             value={selectedCampaign}
-            onChange={(e) => setSelectedCampaign(e.target.value)}
-            className="px-4 py-2 pr-8 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white"
+            onChange={(e) => { setSelectedCampaign(e.target.value); setCurrentPage(1); }}
+            className="px-4 py-2 pr-8 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white min-w-[150px]"
           >
-            {campaigns.map(campaign => (
-              <option key={campaign} value={campaign}>{campaign}</option>
+            <option value="">All Campaigns</option>
+            {campaignOptions.map(camp => (
+              <option key={camp._id} value={camp._id}>{camp.name || camp.campaignName}</option>
             ))}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Export Button with Download icon */}
         <button
           onClick={handleExport}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-all"
@@ -284,8 +363,22 @@ export default function Fans() {
         </button>
       </div>
 
+      {/* ─── Error State ────────────────────────────────── */}
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-start gap-3">
+          <AlertCircle size={20} className="shrink-0 mt-0.5 text-red-500" />
+          <p className="text-sm font-medium">{error}</p>
+        </div>
+      )}
+
       {/* ─── Table ──────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center">
+            <Loader2 size={32} className="text-primary animate-spin" />
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -299,44 +392,58 @@ export default function Fans() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {currentFans.map((fan) => (
-                <tr key={fan.id} className="hover:bg-gray-50/50 transition-colors group">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{fan.name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{fan.email}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{fan.category}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{fan.items}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-green-50 text-green-700 rounded-full">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                      {fan.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right relative">
-                    {/* ─── Horizontal Three Dots ──────────── */}
-                    <button
-                      onClick={() => setDropdownOpen(dropdownOpen === fan.id ? null : fan.id)}
-                      className="p-1.5 hover:bg-gray-100 rounded-lg transition-all"
-                    >
-                      <MoreHorizontal size={16} className="text-gray-400" />
-                    </button>
-
-                    {/* Dropdown Menu */}
-                    {dropdownOpen === fan.id && (
-                      <div className="absolute right-4 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                        <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
-                          View Details
-                        </button>
-                        <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
-                          Send Message
-                        </button>
-                        <button className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-all">
-                          Remove Fan
-                        </button>
-                      </div>
-                    )}
+              {!loading && fansData.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                    No fans found matching your criteria.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                fansData.map((fan, index) => {
+                  const fanId = fan._id || index
+                  
+                  const fanName = fan.name || 'Unknown Fan'
+                  const fanEmail = fan.email || 'N/A'
+                  const itemsCount = fan.numberOfItems || 0
+                  
+                  // Map categories array from API
+                  const merchCategory = fan.categories?.length > 0 
+                    ? fan.categories.join(', ') 
+                    : 'N/A'
+                  const status = fan.status || 'active'
+
+                  return (
+                    <tr key={fanId} className="hover:bg-gray-50/50 transition-colors group">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{fanName}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{fanEmail}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{merchCategory}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{itemsCount}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-green-50 text-green-700 rounded-full capitalize">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                          {status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right relative">
+                        <button
+                          onClick={() => setDropdownOpen(dropdownOpen === fanId ? null : fanId)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all"
+                        >
+                          <MoreHorizontal size={16} className="text-gray-400" />
+                        </button>
+
+                        {dropdownOpen === fanId && (
+                          <div className="absolute right-4 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                            <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all">
+                              View Details
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -344,14 +451,14 @@ export default function Fans() {
         {/* ─── Pagination ────────────────────────────────── */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
           <p className="text-sm text-gray-500">
-            Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
-            <span className="font-medium">{Math.min(startIndex + itemsPerPage, filteredFans.length)}</span> of{' '}
-            <span className="font-medium">{filteredFans.length}</span> fans
+            Showing <span className="font-medium">{fansData.length > 0 ? startIndex + 1 : 0}</span> to{' '}
+            <span className="font-medium">{Math.min(startIndex + itemsPerPage, totalFansCount)}</span> of{' '}
+            <span className="font-medium">{totalFansCount}</span> fans
           </p>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
+              disabled={currentPage === 1 || loading}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-all"
             >
               Previous
@@ -359,7 +466,7 @@ export default function Fans() {
             <span className="text-sm text-gray-600 px-2">Page {currentPage} of {totalPages}</span>
             <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
+              disabled={currentPage === totalPages || loading}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-all"
             >
               Next
