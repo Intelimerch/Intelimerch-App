@@ -1,6 +1,6 @@
 // src/pages/fan/CampaignPageRenderer.jsx
 import { useNavigate } from "react-router-dom";
-import { Video, Image as ImageIcon, Music } from "lucide-react";
+import { Music } from "lucide-react";
 import {
   FONT_FAMILIES,
   resolveStyle,
@@ -10,32 +10,31 @@ import {
   normalizeBlockStyle,
 } from "../../utils/campaignPageStyles";
 
-// Special in-page anchor that scrolls to the perks list on the same page.
-const PERKS_ANCHOR = "#perks";
-
-// Custom event dispatched when a no-URL button is tapped. The host page
-// (PerksLanding) listens for this and reveals the perks section.
 export const REVEAL_PERKS_EVENT = "campaign:reveal-perks";
 
 export default function CampaignPageRenderer({ pageStructure }) {
   if (!pageStructure) return null;
 
-  const theme = normalizeTheme(pageStructure.theme);
+  const theme = normalizeTheme(pageStructure.styles?.theme || pageStructure.theme);
   const blocks = Array.isArray(pageStructure.blocks) ? pageStructure.blocks : [];
 
   if (blocks.length === 0) return null;
 
   return (
-    <div
-      style={{
+    <div 
+      className="w-full pb-6" 
+      style={{ 
         backgroundColor: theme.bgColor,
-        fontFamily: FONT_FAMILIES.find(f => f.value === theme.fontFamily)?.stack,
+        fontFamily: FONT_FAMILIES.find(f => f.value === theme.fontFamily)?.stack 
       }}
-      className="w-full"
     >
-      <div className="space-y-4">
-        {blocks.map(block => (
-          <RenderBlock key={block.id} block={block} theme={theme} />
+      <div className="flex flex-col gap-4">
+        {blocks.map((block, index) => (
+          <RenderBlock 
+            key={block.blockId || block.id || `block-${index}`} 
+            block={block} 
+            theme={theme} 
+          />
         ))}
       </div>
     </div>
@@ -44,138 +43,124 @@ export default function CampaignPageRenderer({ pageStructure }) {
 
 function RenderBlock({ block, theme }) {
   const navigate = useNavigate();
-  const style = normalizeBlockStyle(block.style);
+  const style = normalizeBlockStyle(block.styles || block.style);
   const resolved = resolveStyle(theme, style);
   const css = styleToCss(resolved);
   const className = styleToClasses(resolved);
 
+  const type = String(block.type || "").toLowerCase().trim();
+
+  // Extract text safely
+  const textContent = block.content?.text || (typeof block.content === "string" ? block.content : "");
+
+  // Extract media URL safely
+  const mediaUrl = block.meta?.url || block.content?.meta?.url || block.content?.url || "";
+
   const handleButtonClick = (url) => {
     const target = (url || "").trim();
-
-    // 1 & 2 — no URL or the perks anchor → ask the page to reveal perks
-    if (!target || target === PERKS_ANCHOR) {
+    if (!target || target === "#perks") {
       window.dispatchEvent(new CustomEvent(REVEAL_PERKS_EVENT));
       return;
     }
-
-    // 3 — internal app path
     if (target.startsWith("/")) {
       navigate(target);
       return;
     }
-
-    // 4 & 5 — external URL
     window.open(target, "_blank", "noopener,noreferrer");
   };
 
-  switch (block.type) {
-    case "Header":
+  switch (type) {
+    case "header":
       return (
-        <h1
-          className={`${className || "text-2xl font-bold"} leading-tight`}
-          style={css}
-        >
-          {block.content}
+        <h1 className={`px-4 leading-tight ${className || "text-2xl font-bold"}`} style={css}>
+          {textContent}
         </h1>
       );
 
-    case "Text":
+    case "text":
       return (
-        <p
-          className={`${className || "text-base"} leading-relaxed`}
-          style={css}
-        >
-          {block.content}
+        <p className={`px-4 leading-relaxed whitespace-pre-wrap ${className || "text-base"}`} style={css}>
+          {textContent}
         </p>
       );
 
-    case "Button":
+    case "button":
       return (
-        <div className={className}>
+        <div className="px-4">
           <button
             type="button"
-            onClick={() => handleButtonClick(block.meta?.url)}
-            className="w-full py-3 rounded-xl font-semibold transition-all active:scale-[0.98]"
+            onClick={() => handleButtonClick(block.content?.meta?.url || block.meta?.url)}
+            className={`w-full py-3 rounded-xl font-bold transition-all active:scale-[0.98] ${className || "text-center"}`}
             style={{
-              backgroundColor: resolved.bgColor || theme.primaryColor,
+              ...css,
+              backgroundColor: resolved.bgColor || theme.primaryColor || "#F97316",
               color: resolved.textColor || "#FFFFFF",
-              fontFamily: css.fontFamily,
-              fontSize: css.fontSize,
-              textAlign: resolved.textAlign || "center",
             }}
           >
-            {block.content || "Continue"}
+            {textContent || "Claim Your Perk"}
           </button>
         </div>
       );
 
-    case "Image":
-      return block.meta?.url ? (
-        <img
-          src={block.meta.url}
-          alt={block.content || "Campaign image"}
-          className="w-full rounded-xl"
-          style={{ backgroundColor: resolved.bgColor || undefined }}
-        />
+    case "image":
+      return mediaUrl ? (
+        <div className="px-4">
+          <img
+            src={mediaUrl}
+            alt={textContent || "Campaign image"}
+            className="w-full rounded-2xl object-cover max-h-72 shadow-sm"
+            style={{ backgroundColor: resolved.bgColor || undefined }}
+          />
+        </div>
+      ) : null;
+
+    case "video":
+      return mediaUrl ? (
+        <div className="px-4">
+          <video
+            src={mediaUrl}
+            controls
+            className="w-full rounded-2xl object-cover max-h-72 bg-black shadow-sm"
+            style={{ backgroundColor: resolved.bgColor || "#000" }}
+          />
+        </div>
       ) : (
-        <div
-          className="h-32 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: resolved.bgColor || "#F3F4F6" }}
-        >
-          <ImageIcon size={20} style={{ color: resolved.textColor || "#9CA3AF" }} />
+        // A nice placeholder if the backend drops the URL
+        <div className="px-4">
+          <div className="w-full h-48 bg-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-400 border border-gray-200">
+            <span className="text-sm font-medium">Video Upload Pending</span>
+            <span className="text-xs">Backend didn't return a URL</span>
+          </div>
         </div>
       );
 
-    case "Video":
-      return block.meta?.url ? (
-        <video
-          src={block.meta.url}
-          controls
-          className="w-full rounded-xl"
-          style={{ backgroundColor: resolved.bgColor || "#000" }}
-        />
-      ) : (
-        <div
-          className="h-40 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: resolved.bgColor || "#F3F4F6" }}
-        >
-          <Video size={20} style={{ color: resolved.textColor || "#9CA3AF" }} />
-        </div>
-      );
-
-    case "Audio":
+    case "audio":
       return (
-        <div
-          className="rounded-xl p-3 space-y-2"
-          style={{ backgroundColor: resolved.bgColor || "#FEF3C7" }}
-        >
-          {block.content && (
-            <p className={`${className || "text-sm"}`} style={css}>
-              {block.content}
-            </p>
-          )}
-          {block.meta?.url ? (
-            <audio src={block.meta.url} controls className="w-full" />
-          ) : (
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <Music size={14} />
-              <span>Audio unavailable</span>
-            </div>
-          )}
+        <div className="px-4">
+          <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: resolved.bgColor || "#FEF3C7" }}>
+            {textContent && <p className={`${className || "text-sm"}`} style={css}>{textContent}</p>}
+            {mediaUrl ? (
+              <audio src={mediaUrl} controls className="w-full" />
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <Music size={14} />
+                <span>Audio unavailable</span>
+              </div>
+            )}
+          </div>
         </div>
       );
 
-    case "Footer":
+    case "footer":
       return (
-        <p
-          className={`${className || "text-xs text-center"} pt-3 border-t border-gray-100`}
-          style={css}
-        >
-          {block.content}
+        <p className={`px-4 pt-4 border-t border-gray-100 ${className || "text-xs text-center"}`} style={css}>
+          {textContent}
         </p>
       );
 
     default:
-      return null;
+      return textContent ? (
+        <div className="px-4 text-sm text-gray-700">{textContent}</div>
+      ) : null;
   }
 }

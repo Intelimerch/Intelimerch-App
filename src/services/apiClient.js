@@ -13,8 +13,6 @@ export const clearToken = () => {
   localStorage.removeItem('user');
 };
 
-// Endpoints where a 401 means "this is a fan / entry endpoint" — never redirect
-// to /signin, always surface a friendly message.
 const AUTH_ENTRY_ENDPOINTS = [
   '/auth/login',
   '/auth/register-artist',
@@ -26,7 +24,6 @@ function isAuthEntryEndpoint(endpoint) {
   return AUTH_ENTRY_ENDPOINTS.some((path) => endpoint.startsWith(path));
 }
 
-// ── Custom Error Class ──
 export class ApiError extends Error {
   constructor(message, status, code) {
     super(message);
@@ -36,7 +33,6 @@ export class ApiError extends Error {
   }
 }
 
-// ── Detect a genuinely expired session (not a generic 401) ──
 function isExpiredSessionMessage(message = '') {
   const m = String(message).toLowerCase();
   return (
@@ -47,7 +43,6 @@ function isExpiredSessionMessage(message = '') {
   );
 }
 
-// ── Generic API request ──
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
@@ -95,7 +90,6 @@ export async function apiRequest(endpoint, options = {}) {
       }
     }
 
-    // ── 401 handling ──
     if (response.status === 401) {
       let data;
       try {
@@ -140,7 +134,6 @@ export async function apiRequest(endpoint, options = {}) {
       );
     }
 
-    // ── Parse body ──
     let data;
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
@@ -209,9 +202,8 @@ export async function apiRequest(endpoint, options = {}) {
   }
 }
 
-// ── HTTP methods ──
 export const api = {
-  get: (endpoint) => apiRequest(endpoint, { method: 'GET' }),
+  get: (endpoint, options) => apiRequest(endpoint, { method: 'GET', ...options }),
   post: (endpoint, body) =>
     apiRequest(endpoint, {
       method: 'POST',
@@ -268,48 +260,36 @@ export const api = {
     }
   },
 
-  // ── Email Confirmation & Password Reset ──
   confirmEmail: (email, otp) => api.post('/auth/confirm-email', { email, otp }),
-  
   requestPasswordOtp: (email) => api.post('/auth/forgot-password/request-otp', { email }),
-  
   verifyPasswordOtp: (email, otp) => api.post('/auth/forgot-password/verify-otp', { email, otp }),
-  
   resetPassword: (data) => api.post('/auth/forgot-password/reset', data),
-
 };
 
 // ── Admin APIs ──
 export const adminAPI = {
   registerStaff: (data) => api.post('/admin/register-staff', data),
   registerCreator: (data) => api.post('/admin/register-creator', data),
-
   getCreators: () => api.get('/admin/creators'),
   getCreatorFans: (artistId) => api.get(`/admin/fans/${artistId}`),
   deleteCreator: (creatorId) => api.delete(`/admin/creators/${creatorId}`),
-
   createPerkCategory: (data) => api.post('/admin/create-perk-category', data),
   getPerkCategories: () => api.get('/admin/get-perks-categories'),
-
   createCampaign: (artistId, data) => api.post(`/admin/${artistId}/create-campaign`, data),
   getAllCampaigns: () => api.get('/admin/campaigns'),
   getCampaignById: (campaignId) => api.get(`/admin/campaigns/${campaignId}`),
   updateCampaign: (campaignId, data) => api.patch(`/admin/campaigns/${campaignId}`, data),
   deleteCampaign: (campaignId) => api.delete(`/admin/campaigns/${campaignId}`),
-
   createProduct: (artistId, data) => api.post(`/admin/${artistId}/create-product`, data),
   getAllProducts: () => api.get('/admin/products'),
   updateProduct: (productId, data) => api.patch(`/admin/products/${productId}`, data),
   deleteProduct: (productId) => api.delete(`/admin/products/${productId}`),
-
   getAllTags: () => api.get('/admin/tags'),
   createTag: (data) => api.post('/admin/tags', data),
   updateTag: (tagId, data) => api.patch(`/admin/tags/${tagId}`, data),
   deleteTag: (tagId) => api.delete(`/admin/tags/${tagId}`),
-
   createPerk: (artistId, data) => api.post(`/admin/${artistId}/create-perk`, data),
   getAllPerks: () => api.get('/admin/perks'),
-
   assignProductToCampaign: (artistId, data) =>
     api.post(`/admin/${artistId}/assign-product-to-campaign`, data),
 };
@@ -318,8 +298,6 @@ export const adminAPI = {
 export const perksAPI = {
   getCategories: () => api.get('/admin/get-perks-categories'),
   createCategory: (data) => api.post('/admin/create-perk-category', data),
-
-  // POST /perks — now requires multipart with a `file`.
   create: (data, file) => {
     const formData = new FormData();
     Object.entries(data).forEach(([key, value]) => {
@@ -330,9 +308,7 @@ export const perksAPI = {
     if (file) formData.append('file', file);
     return apiRequest('/perks', { method: 'POST', body: formData });
   },
-
   getAll: () => api.get('/perks'),
-
   update: (perkId, fields = {}, file = null) => {
     const formData = new FormData();
     Object.entries(fields).forEach(([key, value]) => {
@@ -342,13 +318,8 @@ export const perksAPI = {
     });
     if (file) formData.append('file', file);
     if (fields.file) formData.append('file', fields.file);
-
-    return apiRequest(`/perks/${perkId}`, {
-      method: 'PATCH',
-      body: formData,
-    });
+    return apiRequest(`/perks/${perkId}`, { method: 'PATCH', body: formData });
   },
-
   updateJson: (perkId, fields = {}) => api.patch(`/perks/${perkId}`, fields),
   remove: (perkId) => api.delete(`/perks/${perkId}`),
 };
@@ -357,7 +328,6 @@ export const perksAPI = {
 export const campaignAPI = {
   create: (data, file) => {
     const formData = new FormData();
-
     Object.entries(data).forEach(([key, value]) => {
       if (key === 'perks') {
         formData.append('perks', JSON.stringify(value || []));
@@ -365,18 +335,13 @@ export const campaignAPI = {
         formData.append(key, value);
       }
     });
-
     if (file) formData.append('media', file);
-
     return apiRequest('/campaigns', { method: 'POST', body: formData });
   },
   getAll: (page = 1, limit = 20) => api.get(`/campaigns?page=${page}&limit=${limit}`),
   getById: (campaignId) => api.get(`/campaigns/${campaignId}`),
   update: (campaignId, data) => api.patch(`/campaigns/${campaignId}`, data),
   delete: (campaignId) => api.delete(`/campaigns/${campaignId}`),
-
-  // POST /campaigns/:campaignId/pages — now requires multipart with
-  // pageStructure as a JSON string.
   createPage: (campaignId, pageStructure) => {
     const formData = new FormData();
     formData.append('pageStructure', JSON.stringify(pageStructure));
@@ -465,7 +430,6 @@ export const detectDeviceType = () => {
   return 'web';
 };
 
-// ── Device Info Helper ──
 export async function getDeviceInfo() {
   let ip = null;
   try {
@@ -505,7 +469,6 @@ export async function getDeviceInfo() {
   };
 }
 
-// ── Tap outcome constants ──
 export const TAP_OUTCOME = {
   RETURNING: 'returning',
   FRESH: 'fresh',
@@ -546,19 +509,34 @@ export const tapAPI = {
     });
   },
 
+  // 🚨 FIXED: Cache busting to prevent the 304 Not Modified blank screen
   getCampaignResources: ({ tapToken, ownerToken }) => {
     const params = new URLSearchParams({ tapToken });
     if (ownerToken) params.append('ownerToken', ownerToken);
-    return api.get(`/taps/nfc/campaign-page-resources?${params.toString()}`);
+    params.append('_t', Date.now()); // Cache buster
+    
+    return api.get(`/taps/nfc/campaign-page-resources?${params.toString()}`, {
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
   },
 
+  // 🚨 FIXED: Cache busting
   getCampaignResource: (resourceId, { tapToken, ownerToken }) => {
     const params = new URLSearchParams({ tapToken, ownerToken });
-    return api.get(`/taps/nfc/campaign-page-resource/${resourceId}?${params.toString()}`);
+    params.append('_t', Date.now()); // Cache buster
+    
+    return api.get(`/taps/nfc/campaign-page-resource/${resourceId}?${params.toString()}`, {
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
   },
 };
 
-// ── Read tap outcome from response ──
 export const readTapOutcome = (response) => {
   const explicitOutcome = (
     response?.outcome ||

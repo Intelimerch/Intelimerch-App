@@ -53,6 +53,14 @@ function formatTimeline(entries = []) {
   })
 }
 
+// 🚨 NEW: Function to determine greeting based on time of day
+function getGreeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
 export default function Overview() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -128,7 +136,8 @@ export default function Overview() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
           <p className="text-gray-500 text-sm">
-            {user?.firstName ? `Good morning, ${user.firstName} 🎉` : 'Welcome back 🎉'}
+            {/* 🚨 APPLIED THE DYNAMIC GREETING HERE */}
+            {user?.firstName ? `${getGreeting()}, ${user.firstName} 🎉` : `${getGreeting()} 🎉`}
           </p>
         </div>
         <div className="flex items-center gap-3">

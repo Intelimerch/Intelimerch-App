@@ -317,7 +317,7 @@ export default function Products() {
     setDeleteModal({ isOpen: false, productId: null, productName: '' })
   }
 
-  // ─── FIXED: Improved filtering logic ───
+  // ─── FIXED: Improved filtering logic + Sorting (Newest First) ───
   const filteredProducts = products.filter(p => {
     const productName = p.product?.productName || p.productName || p.name || ''
     const productType = getProductTypeName(p) || ''
@@ -343,6 +343,11 @@ export default function Products() {
       productType.toLowerCase().includes(search.toLowerCase())
     
     return matchesFilter && matchesSearch
+  }).sort((a, b) => {
+    // Sort by newest first based on createdAt or updatedAt
+    const dateA = new Date(a.createdAt || a.updatedAt || 0).getTime()
+    const dateB = new Date(b.createdAt || b.updatedAt || 0).getTime()
+    return dateB - dateA
   })
 
   const openDropdown = (id, e) => {

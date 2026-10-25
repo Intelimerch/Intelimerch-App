@@ -56,36 +56,34 @@ const defaultBlocks = [
   { id: 4, type: "Video", content: null, meta: {}, style: defaultBlockStyle("Video") },
 ];
 
-// ─────────────────────────────────────────────
-// Schema transform — frontend shape → backend shape
-// ─────────────────────────────────────────────
+
+
 function toBackendPageStructure({ blocks, theme, socials }) {
   return {
     blocks: blocks.map((b, i) => {
       const rawId = b.id ?? `block-${Date.now()}-${i}`;
       const type = String(b.type || "text").toLowerCase();
 
-      let content;
-      if (b.content === null || b.content === undefined) {
-        content = {};
-      } else if (typeof b.content === "string") {
-        content = { text: b.content };
-      } else if (typeof b.content === "object") {
-        content = { ...b.content };
-      } else {
-        content = { text: String(b.content) };
+      // 1. Safely extract the text (whether it's a string or nested)
+      let text = "";
+      if (typeof b.content === "string") {
+        text = b.content;
+      } else if (b.content && typeof b.content === "object" && b.content.text) {
+        text = b.content.text;
       }
 
-      // Strip any File objects, blob: URLs, or nulls from meta before
-      // sending. The backend doesn't need them, and JSON.stringify(File)
-      // produces `{}` which is confusing in logs.
+      // 2. Safely build the content object
+      const content = { text };
+
+      // 3. Safely attach the meta (URLs and files)
       if (b.meta && typeof b.meta === "object") {
         const safeMeta = {};
         Object.entries(b.meta).forEach(([k, v]) => {
+          // Strip out raw File objects, keep the Cloudinary URL
           if (v instanceof File) return;
-          if (v === undefined || v === null) return;
-          if (k === "url" && typeof v === "string" && v.startsWith("blob:")) return;
-          safeMeta[k] = v;
+          if (v !== undefined && v !== null) {
+            safeMeta[k] = v;
+          }
         });
         if (Object.keys(safeMeta).length > 0) {
           content.meta = safeMeta;
