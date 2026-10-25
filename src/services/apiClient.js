@@ -50,6 +50,7 @@ export async function apiRequest(endpoint, options = {}) {
   const headers = {
     ...(!isFormData && { 'Content-Type': 'application/json' }),
     ...(token && { Authorization: `Bearer ${token}` }),
+    'Cache-Control': 'no-cache',
     ...options.headers,
   };
 
@@ -373,7 +374,7 @@ export const artistAPI = {
 
 // ── Product APIs ──
 export const productAPI = {
-  getAll: (page = 1, limit = 20) => api.get(`/products?page=${page}&limit=${limit}`),
+  getAll: (page = 1, limit = 20) => api.get(`/products?page=${page}&limit=${limit}&_t=${Date.now()}`),
   create: (data) => api.post('/products', data),
   update: (productId, data) => api.patch(`/products/${productId}`, data),
   delete: (productId) => api.delete(`/products/${productId}`),

@@ -17,7 +17,7 @@ dist-ssr/
 .env.test.local
 .env.production.local
 
-# Keep the example file (so others know what env vars are needed)
+
 !.env.example
 
 # ── Logs ──
@@ -43,10 +43,10 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# ── Netlify (if you use local dev tooling) ──
+
 .netlify/
 
-# ── Vercel (if you keep the old deploy around) ──
+
 .vercel/
 
 # ── Cache directories ──
