@@ -1,8 +1,7 @@
 // src/services/apiClient.js
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  'https://intelimerch.up.railway.app/api/v1';
+  import.meta.env.VITE_API_URL;
 
 // ── Token management ──
 export const getToken = () => localStorage.getItem('accessToken');
