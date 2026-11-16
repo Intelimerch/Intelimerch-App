@@ -520,7 +520,7 @@ export default function AddProduct() {
                   </button>
                   {campaigns.length === 0 ? (
                     <p className="px-4 py-2.5 text-sm text-gray-400">
-                      No campaigns found
+                      No campaigns yet
                     </p>
                   ) : (
                     campaigns.map((c) => {
@@ -540,6 +540,17 @@ export default function AddProduct() {
                       );
                     })
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCampaignDrop(false);
+                      navigate("/dashboard/campaigns/create");
+                    }}
+                    className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-primary font-medium hover:bg-primary-light border-t border-gray-100 text-left"
+                  >
+                    <Plus size={14} /> Create new campaign
+                  </button>
                 </div>
               )}
             </div>

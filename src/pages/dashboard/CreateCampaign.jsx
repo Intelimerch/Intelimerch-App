@@ -285,6 +285,47 @@ export default function CreateCampaign() {
   const isUploadType =
     formData.mediaType === "image" || formData.mediaType === "video";
 
+  // ── Precondition: a campaign must link at least one perk ──
+  // The form is pointless without a perk to attach, so stop here instead of
+  // letting the creator fill everything in and fail on submit.
+  if (!loadingPerks && perks.length === 0) {
+    return (
+      <div className="w-full">
+        <div className="flex items-center justify-between mb-6 w-full">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Create New Campaign
+            </h1>
+            <p className="text-gray-500 text-sm">Create a new campaign</p>
+          </div>
+          <button onClick={handleBack} className="btn-outline w-auto px-5 text-sm">
+            <ArrowLeft size={14} /> Back
+          </button>
+        </div>
+
+        <div className="card max-w-xl text-center">
+          <div className="w-16 h-16 bg-orange-50 rounded-2xl flex items-center justify-center mx-auto mb-5">
+            <AlertCircle size={28} className="text-primary" />
+          </div>
+          <h2 className="text-lg font-bold text-gray-900 mb-2">
+            Add a perk before creating a campaign
+          </h2>
+          <p className="text-sm text-gray-500 leading-relaxed mb-6">
+            A campaign is built around at least one perk — that is what your fans
+            unlock when they tap their merch. Your perk library is empty, so
+            create a perk first and then come back.
+          </p>
+          <button
+            onClick={() => navigate("/dashboard/perks/upload")}
+            className="btn-primary w-auto px-6 mx-auto gap-2"
+          >
+            <Plus size={16} /> Create a Perk
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-6 w-full">
@@ -516,7 +557,7 @@ export default function CreateCampaign() {
                   <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 mt-1 max-h-56 overflow-y-auto">
                     {perks.length === 0 ? (
                       <p className="px-4 py-2.5 text-sm text-gray-400">
-                        No perks found
+                        No perks yet
                       </p>
                     ) : (
                       perks.map((perk) => (
@@ -541,6 +582,17 @@ export default function CreateCampaign() {
                         </button>
                       ))
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPerksOpen(false);
+                        navigate("/dashboard/perks/upload");
+                      }}
+                      className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-primary font-medium hover:bg-primary-light border-t border-gray-100 text-left"
+                    >
+                      <Plus size={14} /> Create new perk
+                    </button>
                   </div>
                 )}
               </div>
