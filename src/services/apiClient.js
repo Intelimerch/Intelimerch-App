@@ -342,9 +342,17 @@ export const campaignAPI = {
   getById: (campaignId) => api.get(`/campaigns/${campaignId}`),
   update: (campaignId, data) => api.patch(`/campaigns/${campaignId}`, data),
   delete: (campaignId) => api.delete(`/campaigns/${campaignId}`),
-  createPage: (campaignId, pageStructure) => {
+  createPage: (campaignId, pageStructure, files = {}) => {
     const formData = new FormData();
     formData.append('pageStructure', JSON.stringify(pageStructure));
+
+    // Block media is uploaded as `file_<blockId>`. The backend matches each
+    // part back to its block and attaches the Cloudinary URL to the block
+    // content, so these parts must actually be sent.
+    Object.entries(files || {}).forEach(([fieldName, file]) => {
+      if (file) formData.append(fieldName, file);
+    });
+
     return apiRequest(`/campaigns/${campaignId}/pages`, {
       method: 'POST',
       body: formData,
