@@ -76,6 +76,14 @@ function validateProduct(data) {
     errors.description = "Description cannot exceed 500 characters";
   if (data.campaignId && !data.productTier)
     errors.productTier = "Product tier is required when linking to a campaign";
+
+  const quantity = String(data.quantity ?? "").trim();
+  if (quantity !== "") {
+    if (!/^\d+$/.test(quantity) || Number(quantity) < 1) {
+      errors.quantity = "Enter a whole number of 1 or more";
+    }
+  }
+
   return errors;
 }
 
@@ -96,6 +104,7 @@ export default function AddProduct() {
       description: "",
       color: "",
       size: "",
+      quantity: "1",
       campaignId: "",
       productTier: "",
     },
@@ -182,6 +191,11 @@ export default function AddProduct() {
         color: formData.color.trim(),
         size: formData.size.trim(),
       };
+
+      const quantity = Number(String(formData.quantity || "").trim());
+      if (Number.isInteger(quantity) && quantity > 0) {
+        payload.quantity = quantity;
+      }
 
       if (formData.productCode.trim())
         payload.productCode = formData.productCode.trim();
@@ -440,6 +454,30 @@ export default function AddProduct() {
               />
               {renderError("size")}
             </div>
+          </div>
+
+          {/* Number of units */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+              Number of Units
+            </label>
+            <input
+              type="number"
+              name="quantity"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              className={`input-field w-full ${fieldErrors.quantity ? "border-red-500 focus:ring-red-500" : ""}`}
+              placeholder="e.g. 50"
+              value={formData.quantity}
+              onChange={handleChange}
+              disabled={loading || success}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              How many of this item are being produced. One NFC tag is generated
+              per unit when you assign it to a campaign.
+            </p>
+            {renderError("quantity")}
           </div>
 
           {/* Campaign */}
