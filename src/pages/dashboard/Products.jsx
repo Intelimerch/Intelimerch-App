@@ -184,12 +184,40 @@ export default function Products() {
     return null
   }
 
+  // Names of the campaigns this product is linked to. A product can appear in
+  // more than one campaign, so this returns a list.
+  const getCampaignNames = (product) => {
+    if (Array.isArray(product.campaigns) && product.campaigns.length > 0) {
+      return product.campaigns.map((c) => c?.campaignName).filter(Boolean)
+    }
+
+    // Legacy single-campaign shapes
+    if (product.campaign?.campaignName) return [product.campaign.campaignName]
+    if (product.campaign?.name) return [product.campaign.name]
+    if (product.campaignName) return [product.campaignName]
+
+    return []
+  }
+
   const getCampaignName = (product) => {
-    if (product.campaign?.campaignName) return product.campaign.campaignName
-    if (product.campaign?.name) return product.campaign.name
-    if (product.campaignName) return product.campaignName
-    if (product.campaignId) return 'Campaign ID: ' + product.campaignId
-    return '-'
+    const names = getCampaignNames(product)
+    return names.length > 0 ? names.join(', ') : 'None'
+  }
+
+  // Campaign column display: one campaign shows its name, several show a count
+  // with the full list on hover, and none shows "None".
+  const getCampaignDisplay = (product) => {
+    const names = getCampaignNames(product)
+
+    if (names.length === 0) {
+      return { label: 'None', title: 'This product is not linked to any campaign yet' }
+    }
+
+    if (names.length === 1) {
+      return { label: names[0], title: names[0] }
+    }
+
+    return { label: `${names.length} campaigns`, title: names.join(', ') }
   }
 
   const fetchProducts = async (page = 1) => {
@@ -488,7 +516,7 @@ export default function Products() {
                   const color = p.colorId || p.color || '-'
                   const size = p.sizeId || p.size || '-'
                   const sku = p.sku || productObj.productCode || '-'
-                  const campaignName = getCampaignName(p)
+                  const campaignDisplay = getCampaignDisplay(p)
                   const scans = p.scans || p.taps || 0
                   const tagId = p.tagId || p.tag || '-'
                   
@@ -511,7 +539,12 @@ export default function Products() {
                       <td className="px-4 py-3 text-gray-500">{color}</td>
                       <td className="px-4 py-3 text-gray-500">{size}</td>
                       <td className="px-4 py-3 text-gray-500">{sku}</td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{campaignName}</td>
+                      <td
+                        className={`px-4 py-3 whitespace-nowrap ${campaignDisplay.label === 'None' ? 'text-gray-400' : 'text-gray-500'}`}
+                        title={campaignDisplay.title}
+                      >
+                        {campaignDisplay.label}
+                      </td>
                       <td className="px-4 py-3 text-gray-500">{productId}</td>
                       <td className="px-4 py-3 text-gray-700">{typeof scans === 'number' ? scans.toLocaleString() : '0'}</td>
                       <td className="px-4 py-3 text-gray-500">{tagId}</td>
