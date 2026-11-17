@@ -359,6 +359,14 @@ export const campaignAPI = {
   getById: (campaignId) => api.get(`/campaigns/${campaignId}`),
   update: (campaignId, data) => api.patch(`/campaigns/${campaignId}`, data),
   delete: (campaignId) => api.delete(`/campaigns/${campaignId}`),
+
+  // Perks linked to a campaign. A campaign only exposes the perks that are
+  // linked to it, so these let a creator add a perk created later on.
+  getPerks: (campaignId) => api.get(`/campaigns/${campaignId}/perks`),
+  addPerk: (campaignId, perkId) =>
+    api.post(`/campaigns/${campaignId}/perks`, { perkId }),
+  removePerk: (campaignId, perkId) =>
+    api.delete(`/campaigns/${campaignId}/perks/${perkId}`),
   createPage: (campaignId, pageStructure, files = {}) => {
     const formData = new FormData();
     formData.append('pageStructure', JSON.stringify(pageStructure));

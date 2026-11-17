@@ -1,10 +1,10 @@
 // src/pages/dashboard/Campaigns.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, CheckCircle, AlertCircle } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, BarChart2, Pencil, Trash2, X, Loader2, Tag, Gift, CheckCircle, AlertCircle } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import ConfirmDialog from '../../components/ConfirmDialog'
-import { campaignAPI } from '../../services/apiClient'
+import { campaignAPI, perksAPI } from '../../services/apiClient'
 import ServerError from '../../components/ServerError'
 
 const PAGE_SIZE = 20
@@ -41,6 +41,14 @@ export default function Campaigns() {
 
   // ── Toast state ──
   const [toast, setToast] = useState(null)
+
+  // ── Manage perks modal ──
+  const [perkModal, setPerkModal] = useState({ open: false, campaignId: null, campaignName: '' })
+  const [perkLoading, setPerkLoading] = useState(false)
+  const [perkSaving, setPerkSaving] = useState(false)
+  const [libraryPerks, setLibraryPerks] = useState([])
+  const [linkedPerkIds, setLinkedPerkIds] = useState([])
+  const [selectedPerkIds, setSelectedPerkIds] = useState([])
 
   const filters = ['All', 'Active', 'Paused', 'Draft']
 
@@ -160,6 +168,83 @@ export default function Campaigns() {
     } catch (err) {
       console.error('❌ Error updating campaign:', err)
       setToast({ type: 'error', message: err.message || 'Failed to update campaign' })
+    }
+  }
+
+  // ── Manage perks ──
+  const openPerkModal = async (campaignId, campaignName) => {
+    setOpenMenu(null)
+    setPerkModal({ open: true, campaignId, campaignName })
+    setPerkLoading(true)
+    setLibraryPerks([])
+    setLinkedPerkIds([])
+    setSelectedPerkIds([])
+
+    try {
+      const [all, linked] = await Promise.all([
+        perksAPI.getAll(),
+        campaignAPI.getPerks(campaignId),
+      ])
+
+      const allPerks = Array.isArray(all?.data) ? all.data : []
+      const linkedIds = (linked?.data?.perks || [])
+        .map((row) => row?.perkId?._id || row?.perkId)
+        .filter(Boolean)
+
+      setLibraryPerks(allPerks)
+      setLinkedPerkIds(linkedIds)
+      setSelectedPerkIds(linkedIds)
+    } catch (err) {
+      console.error('❌ Error loading campaign perks:', err)
+      setToast({ type: 'error', message: err.message || 'Failed to load perks' })
+      setPerkModal({ open: false, campaignId: null, campaignName: '' })
+    } finally {
+      setPerkLoading(false)
+    }
+  }
+
+  const closePerkModal = () => {
+    if (perkSaving) return
+    setPerkModal({ open: false, campaignId: null, campaignName: '' })
+  }
+
+  const togglePerkSelection = (perkId) => {
+    setSelectedPerkIds((prev) =>
+      prev.includes(perkId) ? prev.filter((id) => id !== perkId) : [...prev, perkId]
+    )
+  }
+
+  const savePerks = async () => {
+    const { campaignId, campaignName } = perkModal
+    if (!campaignId) return
+
+    const toAdd = selectedPerkIds.filter((id) => !linkedPerkIds.includes(id))
+    const toRemove = linkedPerkIds.filter((id) => !selectedPerkIds.includes(id))
+
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      closePerkModal()
+      return
+    }
+
+    setPerkSaving(true)
+    try {
+      for (const perkId of toAdd) {
+        await campaignAPI.addPerk(campaignId, perkId)
+      }
+      for (const perkId of toRemove) {
+        await campaignAPI.removePerk(campaignId, perkId)
+      }
+
+      setPerkModal({ open: false, campaignId: null, campaignName: '' })
+      setToast({
+        type: 'success',
+        message: `Perks updated for "${campaignName}".`,
+      })
+    } catch (err) {
+      console.error('❌ Error saving campaign perks:', err)
+      setToast({ type: 'error', message: err.message || 'Failed to update perks' })
+    } finally {
+      setPerkSaving(false)
     }
   }
 
@@ -385,6 +470,67 @@ export default function Campaigns() {
         </div>
       )}
 
+      {/* ── Manage perks modal ── */}
+      {perkModal.open && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={closePerkModal}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-lg font-bold text-gray-900">Manage Perks</h2>
+              <button onClick={closePerkModal} className="p-1 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              These are the perks fans unlock when they tap merch from
+              <span className="font-medium text-gray-700"> {perkModal.campaignName}</span>.
+            </p>
+
+            {perkLoading ? (
+              <div className="py-8 flex items-center justify-center text-gray-400 text-sm gap-2">
+                <Loader2 size={16} className="animate-spin" /> Loading perks…
+              </div>
+            ) : libraryPerks.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-sm text-gray-500 mb-4">Your perk library is empty.</p>
+                <button
+                  onClick={() => navigate('/dashboard/perks/upload')}
+                  className="btn-primary w-auto px-6 mx-auto gap-2"
+                >
+                  <Plus size={16} /> Create a Perk
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-72 overflow-y-auto -mx-2 px-2">
+                {libraryPerks.map((perk) => {
+                  const checked = selectedPerkIds.includes(perk._id)
+                  return (
+                    <button
+                      key={perk._id}
+                      type="button"
+                      onClick={() => togglePerkSelection(perk._id)}
+                      className="flex items-center gap-3 w-full px-3 py-2.5 text-left text-sm rounded-xl hover:bg-gray-50"
+                    >
+                      <span className={`w-4 h-4 border-2 rounded shrink-0 flex items-center justify-center ${checked ? 'bg-primary border-primary' : 'border-gray-300'}`}>
+                        {checked && <CheckCircle size={10} className="text-white" />}
+                      </span>
+                      <span className="flex-1 text-gray-800">{perk.perkName}</span>
+                      <span className="text-xs text-gray-400 capitalize">{perk.contentType}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {!perkLoading && libraryPerks.length > 0 && (
+              <div className="flex gap-3 mt-6">
+                <button onClick={savePerks} disabled={perkSaving} className="btn-primary flex-1 gap-2 disabled:opacity-60">
+                  {perkSaving ? (<><Loader2 size={16} className="animate-spin" /> Saving…</>) : 'Save Changes'}
+                </button>
+                <button onClick={closePerkModal} disabled={perkSaving} className="btn-outline flex-1">Cancel</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Delete confirmation modal ── */}
       <ConfirmDialog
         isOpen={deleteModal.isOpen}
@@ -442,6 +588,14 @@ export default function Campaigns() {
               onClick={() => {
                 const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
                 if (campaign) openEdit(campaign)
+              }}
+            />
+            <MenuBtn
+              icon={<Gift size={14} />}
+              label="Manage Perks"
+              onClick={() => {
+                const campaign = campaigns.find(c => (c.id || c.campaignId || c._id) === openMenu)
+                if (campaign) openPerkModal(openMenu, campaign.campaignName || campaign.name)
               }}
             />
             <MenuBtn
