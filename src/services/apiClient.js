@@ -46,6 +46,21 @@ export async function apiRequest(endpoint, options = {}) {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
 
+  // A blanket 30s cap was aborting perfectly valid uploads. Two things make
+  // these slow: the file is streamed from the API server to Cloudinary (video
+  // especially), and a free-tier instance that has spun down adds a cold start
+  // of up to ~50s. Uploads get a much wider window than ordinary JSON calls.
+  const DEFAULT_TIMEOUT_MS = 60000;
+  const UPLOAD_TIMEOUT_MS = 300000;
+
+  const requestedTimeout = Number(options.timeoutMs);
+  const timeoutMs =
+    Number.isFinite(requestedTimeout) && requestedTimeout > 0
+      ? requestedTimeout
+      : isFormData
+        ? UPLOAD_TIMEOUT_MS
+        : DEFAULT_TIMEOUT_MS;
+
   const headers = {
     ...(!isFormData && { 'Content-Type': 'application/json' }),
     ...(token && { Authorization: `Bearer ${token}` }),
@@ -54,7 +69,7 @@ export async function apiRequest(endpoint, options = {}) {
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -169,7 +184,9 @@ export async function apiRequest(endpoint, options = {}) {
 
     if (error.name === 'AbortError') {
       throw new ApiError(
-        'The request took too long. Please try again.',
+        isFormData
+          ? 'That upload took too long to finish. Try a smaller file, or try again in a moment.'
+          : 'The request took too long. Please try again.',
         408,
         'TIMEOUT'
       );
