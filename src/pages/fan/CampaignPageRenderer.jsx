@@ -1,6 +1,5 @@
 // src/pages/fan/CampaignPageRenderer.jsx
 import { useNavigate } from "react-router-dom";
-import { Music } from "lucide-react";
 import {
   FONT_FAMILIES,
   resolveStyle,
@@ -53,8 +52,21 @@ function RenderBlock({ block, theme }) {
   // Extract text safely
   const textContent = block.content?.text || (typeof block.content === "string" ? block.content : "");
 
-  // Extract media URL safely
-  const mediaUrl = block.meta?.url || block.content?.meta?.url || block.content?.url || "";
+  // Extract media URL safely. Browser-only preview URLs (blob:...) must be
+  // ignored: pages published before this was stripped still have the editor's
+  // local file preview saved in meta.url, and it shadows the real uploaded URL
+  // which made the image render as a broken blob on the fan page.
+  const isUsableMediaUrl = (value) =>
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    !value.startsWith("blob:");
+
+  const mediaUrl =
+    [
+      block.meta?.url,
+      block.content?.meta?.url,
+      block.content?.url,
+    ].find(isUsableMediaUrl) || "";
 
   const handleButtonClick = (url) => {
     const target = (url || "").trim();
@@ -115,6 +127,8 @@ function RenderBlock({ block, theme }) {
       ) : null;
 
     case "video":
+      // An empty media block should render nothing on a fan-facing page
+      // rather than a developer placeholder.
       return mediaUrl ? (
         <div className="px-4">
           <video
@@ -124,29 +138,19 @@ function RenderBlock({ block, theme }) {
             style={{ backgroundColor: resolved.bgColor || "#000" }}
           />
         </div>
-      ) : (
-        // A nice placeholder if the backend drops the URL
-        <div className="px-4">
-          <div className="w-full h-48 bg-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-400 border border-gray-200">
-            <span className="text-sm font-medium">Video Upload Pending</span>
-            <span className="text-xs">Backend didn't return a URL</span>
-          </div>
-        </div>
-      );
+      ) : null;
 
     case "audio":
+      // Nothing to show for an empty audio block.
+      if (!textContent && !mediaUrl) return null;
+
       return (
         <div className="px-4">
           <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: resolved.bgColor || "#FEF3C7" }}>
             {textContent && <p className={`${className || "text-sm"}`} style={css}>{textContent}</p>}
             {mediaUrl ? (
               <audio src={mediaUrl} controls className="w-full" />
-            ) : (
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Music size={14} />
-                <span>Audio unavailable</span>
-              </div>
-            )}
+            ) : null}
           </div>
         </div>
       );

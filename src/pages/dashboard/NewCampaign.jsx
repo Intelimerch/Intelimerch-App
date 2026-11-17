@@ -81,6 +81,11 @@ function toBackendPageStructure({ blocks, theme, socials }) {
         Object.entries(b.meta).forEach(([k, v]) => {
           // Strip out raw File objects, keep the Cloudinary URL
           if (v instanceof File) return;
+          // Drop the editor's local preview (blob:...) and its helper field —
+          // these are only valid in this browser session and would shadow the
+          // real uploaded URL once the block is served to a fan.
+          if (k === "previewUrl") return;
+          if (typeof v === "string" && v.startsWith("blob:")) return;
           if (v !== undefined && v !== null) {
             safeMeta[k] = v;
           }
