@@ -1,6 +1,6 @@
 // src/pages/dashboard/TagGroups.jsx
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Loader2,
   Tag as TagIcon,
@@ -79,6 +79,11 @@ function extractTags(res) {
 export default function TagGroups() {
   const navigate = useNavigate();
 
+  // "View Tags" on a campaign links here with ?campaignId=… — previously this
+  // was ignored, so every campaign showed the artist's whole tag list.
+  const [searchParams] = useSearchParams();
+  const campaignIdFilter = searchParams.get("campaignId") || null;
+
   const [tags, setTags] = useState([]);
   const [loadingTags, setLoadingTags] = useState(false);
   const [error, setError] = useState(null);
@@ -123,7 +128,7 @@ export default function TagGroups() {
       try {
         // Large page size to get as many tags as possible in one shot.
         // If you later have >1000 tags, switch to a server-provided breakdown.
-        const res = await tagsAPI.getArtistTags(1, 1000);
+        const res = await tagsAPI.getArtistTags(1, 1000, campaignIdFilter);
         const allTags = extractTags(res);
 
         const counts = {};
@@ -143,7 +148,7 @@ export default function TagGroups() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [campaignIdFilter]);
 
   // ── Load the current page of tags ──
   const loadTags = useCallback(async () => {
@@ -151,7 +156,7 @@ export default function TagGroups() {
       setLoadingTags(true);
       setError(null);
 
-      const res = await tagsAPI.getArtistTags(page, PAGE_SIZE);
+      const res = await tagsAPI.getArtistTags(page, PAGE_SIZE, campaignIdFilter);
       const tagList = extractTags(res);
       setTags(tagList);
 
@@ -182,7 +187,7 @@ export default function TagGroups() {
     } finally {
       setLoadingTags(false);
     }
-  }, [page]);
+  }, [page, campaignIdFilter]);
 
   useEffect(() => {
     loadTags();

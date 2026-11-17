@@ -425,8 +425,11 @@ export const tiersAPI = {
 export const tagsAPI = {
   getAll: (page = 1, limit = 20) => api.get(`/tags?page=${page}&limit=${limit}`),
   getByCampaign: (campaignId) => api.get(`/tags/${campaignId}`),
-  getArtistTags: (page = 1, limit = 20) =>
-    api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
+  getArtistTags: (page = 1, limit = 20, campaignId = null) => {
+    const params = new URLSearchParams({ page, limit });
+    if (campaignId) params.append('campaignId', campaignId);
+    return api.get(`/tags/artist-all-tags?${params.toString()}`);
+  },
   getAllForArtist: (page = 1, limit = 20) =>
     api.get(`/tags/artist-all-tags?page=${page}&limit=${limit}`),
   create: (data) => api.post('/tags', data),
