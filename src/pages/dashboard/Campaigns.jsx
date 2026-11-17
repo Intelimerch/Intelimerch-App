@@ -360,9 +360,14 @@ export default function Campaigns() {
                           <div className="text-xs text-gray-400">{id}</div>
                         </td>
                         <td className="py-3.5"><StatusBadge status={c.status} /></td>
-                        <td className="py-3.5 font-medium">{c.taps?.toLocaleString() || '0'}</td>
-                        <td className="py-3.5">{c.claims?.toLocaleString() || '0'}</td>
-                        <td className="py-3.5">{c.products || '0'} linked</td>
+                        <td className="py-3.5 font-medium">{(c.tapCount ?? 0).toLocaleString()}</td>
+                        <td className="py-3.5">{(c.claims ?? 0).toLocaleString()}</td>
+                        <td className="py-3.5">
+                          {c.productsLinked ?? 0} linked
+                          <span className="block text-xs text-gray-400">
+                            {c.tagCount ?? 0} tag{(c.tagCount ?? 0) === 1 ? '' : 's'}
+                          </span>
+                        </td>
                         <td className="py-3.5 text-gray-500 text-xs">
                           {c.startDate ? new Date(c.startDate).toLocaleDateString() : '—'}
                           <br />
