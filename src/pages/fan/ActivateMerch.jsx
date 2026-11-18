@@ -112,9 +112,17 @@ export default function ActivateMerch() {
   const { state } = useLocation();
   const tagId = state?.tagId;
 
-  const [firstName, setFirstName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [firstName, setFirstName] = useState(
+    () => localStorage.getItem("fanFirstName") || "",
+  );
+  const [email, setEmail] = useState(
+    () => localStorage.getItem("fanEmail") || "",
+  );
+  // Stored as the full international number; the input shows the local part.
+  const [phone, setPhone] = useState(() => {
+    const digits = (localStorage.getItem("fanPhone") || "").replace(/\D/g, "");
+    return digits.startsWith("234") ? digits.slice(3) : digits;
+  });
   const [consentGiven, setConsentGiven] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -173,6 +181,10 @@ export default function ActivateMerch() {
 
       const response = await tapAPI.activate({
         tapToken,
+        // A returning fan must send their existing owner token: the server then
+        // links this tag to their existing fan record instead of trying to
+        // create a duplicate, which would fail on the unique email/phone index.
+        ownerToken: getOwnerToken() || undefined,
         firstName: firstName.trim(),
         email: email.trim().toLowerCase(),
         phone: fullPhone,
@@ -198,6 +210,8 @@ export default function ActivateMerch() {
       if (newOwnerToken) setOwnerToken(newOwnerToken);
 
       localStorage.setItem("fanFirstName", firstName.trim());
+      localStorage.setItem("fanEmail", email.trim().toLowerCase());
+      localStorage.setItem("fanPhone", fullPhone);
 
       setSuccess(true);
       setTimeout(() => {
